@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import PIL.Image
 import torch
@@ -26,7 +26,21 @@ from torchvision.utils import _log_api_usage_once
 
 from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_box_format
 
-from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal
+from ._utils import (
+    _FillTypeJIT,
+    _get_kernel,
+    _import_cvcuda,
+    _is_cvcuda_available,
+    _register_five_ten_crop_kernel_internal,
+    _register_kernel_internal,
+)
+
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
+if CVCUDA_AVAILABLE:
+    cvcuda = _import_cvcuda()  # noqa: F811
 
 
 def _check_interpolation(interpolation: Union[InterpolationMode, int]) -> InterpolationMode:
@@ -1897,6 +1911,23 @@ def crop_video(video: torch.Tensor, top: int, left: int, height: int, width: int
     return crop_image(video, top, left, height, width)
 
 
+def crop_cvcuda(
+    image: "cvcuda.Tensor",
+    top: int,
+    left: int,
+    height: int,
+    width: int,
+) -> "cvcuda.Tensor":
+    return cvcuda.customcrop(
+        image,
+        cvcuda.RectI(x=left, y=top, width=width, height=height),
+    )
+
+
+if CVCUDA_AVAILABLE:
+    _register_kernel_internal(crop, cvcuda.Tensor)(crop_cvcuda)
+
+
 def perspective(
     inpt: torch.Tensor,
     startpoints: Optional[list[list[int]]],
@@ -2645,6 +2676,21 @@ def center_crop_mask(mask: torch.Tensor, output_size: list[int]) -> torch.Tensor
 @_register_kernel_internal(center_crop, tv_tensors.Video)
 def center_crop_video(video: torch.Tensor, output_size: list[int]) -> torch.Tensor:
     return center_crop_image(video, output_size)
+
+
+def center_crop_cvcuda(
+    image: "cvcuda.Tensor",
+    output_size: list[int],
+) -> "cvcuda.Tensor":
+    crop_height, crop_width = _center_crop_parse_output_size(output_size)
+    return cvcuda.center_crop(
+        image,
+        crop_size=(crop_width, crop_height),
+    )
+
+
+if CVCUDA_AVAILABLE:
+    _register_kernel_internal(center_crop, cvcuda.Tensor)(center_crop_cvcuda)
 
 
 def resized_crop(
