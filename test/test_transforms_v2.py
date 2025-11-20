@@ -2628,7 +2628,17 @@ class TestToDtype:
             scale=scale,
         )
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2643,7 +2653,16 @@ class TestToDtype:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_bounding_boxes, make_segmentation_mask, make_video],
+        [
+            make_image_tensor,
+            make_image,
+            make_bounding_boxes,
+            make_segmentation_mask,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
     )
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
@@ -2807,38 +2826,12 @@ class TestToDtype:
         assert_equal(F.to_dtype(img_float32, torch.uint8, scale=True), img_uint8)
         assert_close(F.to_dtype(img_uint8, torch.float32, scale=True), img_float32, rtol=0, atol=1e-2)
 
-
-@pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="cvcuda is not available")
-@needs_cuda
-class TestToDtypeCVCUDA:
-    @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
-    @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
-    @pytest.mark.parametrize("device", cpu_and_cuda())
-    @pytest.mark.parametrize("scale", (True, False))
-    def test_functional(self, input_dtype, output_dtype, device, scale):
-        check_functional(
-            F.to_dtype,
-            make_image_cvcuda(batch_dims=(1,), dtype=input_dtype, device=device),
-            dtype=output_dtype,
-            scale=scale,
-        )
-
-    @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
-    @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
-    @pytest.mark.parametrize("device", cpu_and_cuda())
-    @pytest.mark.parametrize("scale", (True, False))
-    @pytest.mark.parametrize("as_dict", (True, False))
-    def test_transform(self, input_dtype, output_dtype, device, scale, as_dict):
-        cvc_input = make_image_cvcuda(batch_dims=(1,), dtype=input_dtype, device=device)
-        if as_dict:
-            output_dtype = {type(cvc_input): output_dtype}
-        check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), cvc_input, check_sample_input=not as_dict)
-
+    @pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("scale", (True, False))
-    def test_image_correctness(self, input_dtype, output_dtype, device, scale):
+    def test_cvcuda_parity(self, input_dtype, output_dtype, device, scale):
         if input_dtype.is_floating_point and output_dtype == torch.int64:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
