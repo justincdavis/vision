@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 from torchvision import tv_tensors
 
+
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
 
@@ -167,5 +168,13 @@ def _is_cvcuda_available():
     try:
         _ = _import_cvcuda()
         return True
+    except ImportError:
+        return False
+
+
+def is_cvcuda_tensor(inpt: Any) -> bool:
+    try:
+        cvcuda = _import_cvcuda()
+        return isinstance(inpt, cvcuda.Tensor)
     except ImportError:
         return False
