@@ -158,7 +158,6 @@ from ._misc import (
     sanitize_bounding_boxes,
     sanitize_keypoints,
     to_dtype,
-    to_dtype_cvcuda,
     to_dtype_image,
     to_dtype_video,
 )
