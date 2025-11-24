@@ -376,6 +376,27 @@ def _to_dtype_cvcuda(
     dtype: torch.dtype,
     scale: bool = False,
 ) -> "cvcuda.Tensor":
+    """
+    Convert the dtype of a CV-CUDA tensor, based on a torch.dtype.
+
+    Args:
+        inpt: The CV-CUDA tensor to convert the dtype of.
+        dtype: The torch.dtype to convert the dtype to.
+        scale: Whether to scale the values to the new dtype.
+            There are four cases for the scaling setup:
+            1. float -> float
+            2. int -> int
+            3. float -> int
+            4. int -> float
+            If scale is True, the values will be scaled to the new dtype.
+            If scale is False, the values will not be scaled.
+            The scale values for float -> float and int -> int are 1.0 and 0.0 respectively.
+            The scale values for float -> int and int -> float are the maximum value of the new dtype.
+
+    Returns:
+        out (cvcuda.Tensor): The CV-CUDA tensor with the converted dtype.
+
+    """
     cvcuda = _import_cvcuda()
 
     dtype_in = _cvcuda_to_torch_dtypes[inpt.dtype]
