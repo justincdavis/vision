@@ -2675,8 +2675,7 @@ class TestToDtype:
             output_dtype = {type(input): output_dtype}
         check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), input, check_sample_input=not as_dict)
 
-    @staticmethod
-    def reference_convert_dtype_image_tensor(image, dtype=torch.float, scale=False):
+    def reference_convert_dtype_image_tensor(self, image, dtype=torch.float, scale=False):
         input_dtype = image.dtype
         output_dtype = dtype
 
