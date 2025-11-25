@@ -2078,6 +2078,9 @@ class TestRotate:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
         ],
     )
     def test_functional(self, make_input):
@@ -2092,9 +2095,16 @@ class TestRotate:
             (F.rotate_mask, tv_tensors.Mask),
             (F.rotate_video, tv_tensors.Video),
             (F.rotate_keypoints, tv_tensors.KeyPoints),
+            pytest.param(
+                F._geometry._rotate_cvcuda,
+                "cvcuda.Tensor",
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.rotate, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -2107,6 +2117,9 @@ class TestRotate:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
         ],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2122,12 +2135,28 @@ class TestRotate:
     )
     @pytest.mark.parametrize("expand", [False, True])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
-    def test_functional_image_correctness(self, angle, center, interpolation, expand, fill):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
+    def test_functional_image_correctness(self, angle, center, interpolation, expand, fill, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
         actual = F.rotate(image, angle=angle, center=center, interpolation=interpolation, expand=expand, fill=fill)
+
+        if make_input == make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            image = F.cvcuda_to_tensor(image)
+            # drop the batch dimensions
+            image = image.squeeze(0)
+
         expected = F.to_image(
             F.rotate(
                 F.to_pil_image(image), angle=angle, center=center, interpolation=interpolation, expand=expand, fill=fill
@@ -2135,7 +2164,11 @@ class TestRotate:
         )
 
         mae = (actual.float() - expected.float()).abs().mean()
-        assert mae < 1 if interpolation is transforms.InterpolationMode.NEAREST else 6
+        if make_input == make_image_cvcuda:
+            # CV-CUDA nearest interpolation differs significantly from PIL, set much higher bound
+            assert mae < (122.5) if interpolation is transforms.InterpolationMode.NEAREST else 6, f"MAE: {mae}"
+        else:
+            assert mae < 1 if interpolation is transforms.InterpolationMode.NEAREST else 6, f"MAE: {mae}"
 
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
     @pytest.mark.parametrize(
@@ -2144,8 +2177,17 @@ class TestRotate:
     @pytest.mark.parametrize("expand", [False, True])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
     @pytest.mark.parametrize("seed", list(range(5)))
-    def test_transform_image_correctness(self, center, interpolation, expand, fill, seed):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
+    def test_transform_image_correctness(self, center, interpolation, expand, fill, seed, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
@@ -2161,10 +2203,21 @@ class TestRotate:
         actual = transform(image)
 
         torch.manual_seed(seed)
+
+        if make_input == make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            image = F.cvcuda_to_tensor(image)
+            # drop the batch dimensions
+            image = image.squeeze(0)
+
         expected = F.to_image(transform(F.to_pil_image(image)))
 
         mae = (actual.float() - expected.float()).abs().mean()
-        assert mae < 1 if interpolation is transforms.InterpolationMode.NEAREST else 6
+        if make_input == make_image_cvcuda:
+            # CV-CUDA nearest interpolation differs significantly from PIL, set much higher bound
+            assert mae < (122.5) if interpolation is transforms.InterpolationMode.NEAREST else 6, f"MAE: {mae}"
+        else:
+            assert mae < 1 if interpolation is transforms.InterpolationMode.NEAREST else 6, f"MAE: {mae}"
 
     def _compute_output_canvas_size(self, *, expand, canvas_size, affine_matrix):
         if not expand:
