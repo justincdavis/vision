@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, Union, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import PIL.Image
 import torch
@@ -26,13 +26,22 @@ from torchvision.utils import _log_api_usage_once
 
 from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_box_format
 
-from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal, _import_cvcuda, _is_cvcuda_available
+from ._utils import (
+    _FillTypeJIT,
+    _get_kernel,
+    _import_cvcuda,
+    _is_cvcuda_available,
+    _register_five_ten_crop_kernel_internal,
+    _register_kernel_internal,
+)
 
-_CVCUDA_AVAILABLE = _is_cvcuda_available()
-if _CVCUDA_AVAILABLE:
-    cvcuda = _import_cvcuda()
+
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
+if CVCUDA_AVAILABLE:
+    cvcuda = _import_cvcuda()  # noqa: F811
 
 
 def _check_interpolation(interpolation: Union[InterpolationMode, int]) -> InterpolationMode:
@@ -1523,9 +1532,7 @@ def _rotate_cvcuda(
     fill: _FillTypeJIT = None,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    
-    
-    
+
     return cvcuda.rotate(inpt, angle, interpolation=interpolation, expand=expand, fill=fill, center=center)
 
 
