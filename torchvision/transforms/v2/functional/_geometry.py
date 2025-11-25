@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import PIL.Image
 import torch
@@ -26,7 +26,21 @@ from torchvision.utils import _log_api_usage_once
 
 from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_box_format
 
-from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal
+from ._utils import (
+    _FillTypeJIT,
+    _get_kernel,
+    _import_cvcuda,
+    _is_cvcuda_available,
+    _register_five_ten_crop_kernel_internal,
+    _register_kernel_internal,
+)
+
+
+_CVCUDA_AVAILABLE = _is_cvcuda_available()
+if _CVCUDA_AVAILABLE:
+    cvcuda = _import_cvcuda()
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
 
 
 def _check_interpolation(interpolation: Union[InterpolationMode, int]) -> InterpolationMode:
@@ -1653,6 +1667,49 @@ def _pad_with_vector_fill(
 
 
 _pad_image_pil = _register_kernel_internal(pad, PIL.Image.Image)(_FP.pad)
+
+
+if _CVCUDA_AVAILABLE:
+    cvcuda = _import_cvcuda()
+    _pad_mode_to_cvcuda = {
+        "constant": cvcuda.BorderType.CONSTANT,
+        "reflect": cvcuda.BorderType.REFLECT,
+        "replicate": cvcuda.BorderType.REPLICATE,
+        "symmetric": cvcuda.BorderType.WRAP,
+    }
+
+
+def _pad_cvcuda(
+    image: "cvcuda.Tensor",
+    padding: list[int],
+    fill: Optional[Union[int, float, list[float]]] = None,
+    padding_mode: str = "constant",
+) -> "cvcuda.Tensor":
+    cvcuda = _import_cvcuda()
+
+    if padding_mode not in _pad_mode_to_cvcuda:
+        raise ValueError(f"Padding mode '{padding_mode}' is not supported with CVCUDA")
+
+    if fill is None:
+        fill = 0
+    if isinstance(fill, (int, float)):
+        fill = [fill] * image.shape[3]
+
+    left, right, top, bottom = _parse_pad_padding(padding)
+
+    return cvcuda.copymakeborder(
+        image,
+        border_mode=_pad_mode_to_cvcuda[padding_mode],
+        border_value=fill,
+        top=top,
+        left=left,
+        bottom=bottom,
+        right=right,
+    )
+
+
+if _CVCUDA_AVAILABLE:
+    _register_kernel_internal(pad, _import_cvcuda().Tensor)(_pad_cvcuda)
 
 
 @_register_kernel_internal(pad, tv_tensors.Mask)
