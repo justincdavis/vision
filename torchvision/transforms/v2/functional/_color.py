@@ -569,29 +569,39 @@ def autocontrast_video(video: torch.Tensor) -> torch.Tensor:
     return autocontrast_image(video)
 
 
+def _max_value_cvcuda(dtype: "cvcuda.Type") -> float | int:
+    if dtype == cvcuda.Type.U8:
+        return 255
+    if dtype == cvcuda.Type.U16:
+        return 65535
+    if dtype == cvcuda.Type.F32:
+        return 1.0
+    if dtype == cvcuda.Type.F64:
+        return 1.0
+    raise ValueError(f"Unsupported dtype: {dtype}")
+
+
 def _autocontrast_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
 
-    # use zero-copy to get the tensor directly
-    img_tensor = torch.as_tensor(image.cuda())
+    if image.shape[3] == 3:
+        grayscale = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY)
+    else:
+        grayscale = image
 
-    # CV-CUDA doesnt have a per-channel min_max implementation, nor a way to split channels
-    minimum = img_tensor.amin(dim=(1, 2), keepdim=True).float()  # (N, 1, 1, C)
-    maximum = img_tensor.amax(dim=(1, 2), keepdim=True).float()  # (N, 1, 1, C)
+    minimum, _, _, maximum, _, _ = cvcuda.min_max_loc(grayscale)
+    minimum = cvcuda.as_image(minimum.cuda()).cpu()
+    maximum = cvcuda.as_image(maximum.cuda()).cpu()
 
-    # dont divide by zero
-    eq_idxs = maximum == minimum
-    diff = maximum - minimum
-    diff[eq_idxs] = 1.0
-    minimum[eq_idxs] = 0.0
-
-    # values in (N, 1, 1, C) layout
-    scale = (_max_value(img_tensor.dtype) / diff).contiguous()
-    base = minimum.contiguous()
+    scale = _max_value_cvcuda(image.dtype) / (maximum - minimum)
 
     # now we can create the tensors for CV-CUDA to use in normalize
-    base_tensor = cvcuda.as_tensor(base, "NHWC")
-    scale_tensor = cvcuda.as_tensor(scale, "NHWC")
+    base_tensor = cvcuda.as_tensor(
+        torch.tensor(minimum, dtype=torch.float64).reshape(1, 1, 1, 1).to(device="cuda"), "NHWC"
+    )
+    scale_tensor = cvcuda.as_tensor(
+        torch.tensor(scale, dtype=torch.float64).reshape(1, 1, 1, 1).to(device="cuda"), "NHWC"
+    )
     return cvcuda.normalize(image, base=base_tensor, scale=scale_tensor, globalscale=1.0, globalshift=0.0)
 
 
