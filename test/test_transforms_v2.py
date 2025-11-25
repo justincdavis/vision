@@ -5904,7 +5904,18 @@ class TestSolarize:
         video = make_video()
         check_kernel(F.solarize_video, video, threshold=self._make_threshold(video))
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_functional(self, make_input):
         input = make_input()
         check_functional(F.solarize, input, threshold=self._make_threshold(input))
@@ -5916,9 +5927,16 @@ class TestSolarize:
             (F._color._solarize_image_pil, PIL.Image.Image),
             (F.solarize_image, tv_tensors.Image),
             (F.solarize_video, tv_tensors.Video),
+            pytest.param(
+                F._color._solarize_cvcuda,
+                "cvcuda.Tensor",
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.solarize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(("dtype", "threshold"), [(torch.uint8, 256), (torch.float, 1.5)])
@@ -5926,21 +5944,52 @@ class TestSolarize:
         with pytest.raises(TypeError, match="Threshold should be less or equal the maximum value of the dtype"):
             F.solarize(make_image(dtype=dtype), threshold=threshold)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_transform(self, make_input):
         input = make_input()
         check_transform(transforms.RandomSolarize(threshold=self._make_threshold(input), p=1), input)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("threshold_factor", [0.0, 0.1, 0.5, 0.9, 1.0])
     @pytest.mark.parametrize("fn", [F.solarize, transform_cls_to_functional(transforms.RandomSolarize, p=1)])
-    def test_correctness_image(self, threshold_factor, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, threshold_factor, fn):
+        image = make_input(dtype=torch.uint8, device="cpu")
         threshold = self._make_threshold(image, factor=threshold_factor)
 
         actual = fn(image, threshold=threshold)
+
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            actual = actual.squeeze(0)
+            image = F.cvcuda_to_tensor(image)
+            image = image.squeeze(0)
+
         expected = F.to_image(F.solarize(F.to_pil_image(image), threshold=threshold))
 
-        assert_equal(actual, expected)
+        if make_input is make_image_cvcuda:
+            # CV-CUDA doesnt support thresholding per channel, so we do using the grayscale version
+            torch.testing.assert_close(actual, expected, rtol=0, atol=255)
+        else:
+            assert_equal(actual, expected)
 
 
 class TestAutocontrast:

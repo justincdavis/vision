@@ -14,8 +14,9 @@ from ._type_conversion import pil_to_tensor, to_pil_image
 from ._utils import _get_kernel, _import_cvcuda, _is_cvcuda_available, _register_kernel_internal
 
 
-_CVCUDA_AVAILABLE = _is_cvcuda_available()
-if _CVCUDA_AVAILABLE:
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
+if CVCUDA_AVAILABLE:
     cvcuda = _import_cvcuda()
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
@@ -518,6 +519,40 @@ def solarize_video(video: torch.Tensor, threshold: float) -> torch.Tensor:
     return solarize_image(video, threshold=threshold)
 
 
+def _solarize_cvcuda(image: "cvcuda.Tensor", threshold: float) -> "cvcuda.Tensor":
+    """
+    Solarize an image using CV-CUDA.
+
+    This implementation does not do per-channel thresholding like the torchvision impl.
+    As such, it can have large numerical differences comparatively to the torchvision impl.
+
+    Args:
+        image (cvcuda.Tensor): The image to solarize.
+        threshold (float): The threshold to use for solarization.
+
+    Returns:
+        cvcuda.Tensor: The solarized image.
+    """
+    cvcuda = _import_cvcuda()
+
+    if image.shape[3] == 3:
+        grayscale = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY)
+    else:
+        grayscale = image
+
+    inverted = _invert_cvcuda(image)
+    threshold_tensor = cvcuda.as_tensor(torch.tensor([threshold], dtype=torch.float64, device="cuda"), "N")
+    max_value_tensor = cvcuda.as_tensor(
+        torch.tensor([_max_value(image.dtype)], dtype=torch.float64, device="cuda"), "N"
+    )
+    mask = cvcuda.threshold(grayscale, threshold_tensor, max_value_tensor, cvcuda.ThresholdType.BINARY)
+    return cvcuda.composite(foreground=inverted, background=image, fgmask=mask, outchannels=image.shape[3])
+
+
+if CVCUDA_AVAILABLE:
+    _register_kernel_internal(solarize, _import_cvcuda().Tensor)(_solarize_cvcuda)
+
+
 def autocontrast(inpt: torch.Tensor) -> torch.Tensor:
     """See :class:`~torchvision.transforms.v2.RandomAutocontrast` for details."""
     if torch.jit.is_scripting():
@@ -689,7 +724,7 @@ def invert_video(video: torch.Tensor) -> torch.Tensor:
     return invert_image(video)
 
 
-if _CVCUDA_AVAILABLE:
+if CVCUDA_AVAILABLE:
     _invert_cvcuda_tensors = {}
 
 
@@ -721,7 +756,7 @@ def _invert_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
     return cvcuda.normalize(image, base=base, scale=scale, globalscale=1.0, globalshift=shift)
 
 
-if _CVCUDA_AVAILABLE:
+if CVCUDA_AVAILABLE:
     _register_kernel_internal(invert, _import_cvcuda().Tensor)(_invert_cvcuda)
 
 
