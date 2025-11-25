@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, TYPE_CHECKING
 
 import PIL.Image
 import torch
@@ -26,7 +26,13 @@ from torchvision.utils import _log_api_usage_once
 
 from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_box_format
 
-from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal
+from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal, _import_cvcuda, _is_cvcuda_available
+
+_CVCUDA_AVAILABLE = _is_cvcuda_available()
+if _CVCUDA_AVAILABLE:
+    cvcuda = _import_cvcuda()
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
 
 
 def _check_interpolation(interpolation: Union[InterpolationMode, int]) -> InterpolationMode:
@@ -1506,6 +1512,25 @@ def rotate_video(
     fill: _FillTypeJIT = None,
 ) -> torch.Tensor:
     return rotate_image(video, angle, interpolation=interpolation, expand=expand, fill=fill, center=center)
+
+
+def _rotate_cvcuda(
+    inpt: "cvcuda.Tensor",
+    angle: float,
+    interpolation: Union[InterpolationMode, int] = InterpolationMode.NEAREST,
+    expand: bool = False,
+    center: Optional[list[float]] = None,
+    fill: _FillTypeJIT = None,
+) -> "cvcuda.Tensor":
+    cvcuda = _import_cvcuda()
+    
+    
+    
+    return cvcuda.rotate(inpt, angle, interpolation=interpolation, expand=expand, fill=fill, center=center)
+
+
+if _CVCUDA_AVAILABLE:
+    _register_kernel_internal(rotate, _import_cvcuda().Tensor)(rotate_cvcuda)
 
 
 def pad(
