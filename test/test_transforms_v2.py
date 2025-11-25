@@ -5913,7 +5913,18 @@ class TestAutocontrast:
     def test_kernel_video(self):
         check_kernel(F.autocontrast_video, make_video())
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.autocontrast, make_input())
 
@@ -5924,20 +5935,54 @@ class TestAutocontrast:
             (F._color._autocontrast_image_pil, PIL.Image.Image),
             (F.autocontrast_image, tv_tensors.Image),
             (F.autocontrast_video, tv_tensors.Video),
+            pytest.param(
+                F._color._autocontrast_cvcuda,
+                "cvcuda.Tensor",
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.autocontrast, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomAutocontrast(p=1), make_input(), check_v1_compatibility=dict(rtol=0, atol=1))
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("fn", [F.autocontrast, transform_cls_to_functional(transforms.RandomAutocontrast, p=1)])
-    def test_correctness_image(self, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, fn):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = fn(image)
+
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            actual = actual.squeeze(0)
+            image = F.cvcuda_to_tensor(image)
+            image = image.squeeze(0)
+
         expected = F.to_image(F.autocontrast(F.to_pil_image(image)))
 
         assert_close(actual, expected, rtol=0, atol=1)

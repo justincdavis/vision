@@ -569,6 +569,36 @@ def autocontrast_video(video: torch.Tensor) -> torch.Tensor:
     return autocontrast_image(video)
 
 
+def _autocontrast_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
+    cvcuda = _import_cvcuda()
+
+    # use zero-copy to get the tensor directly
+    img_tensor = torch.as_tensor(image.cuda())
+
+    # CV-CUDA doesnt have a per-channel min_max implementation, nor a way to split channels
+    minimum = img_tensor.amin(dim=(1, 2), keepdim=True).float()  # (N, 1, 1, C)
+    maximum = img_tensor.amax(dim=(1, 2), keepdim=True).float()  # (N, 1, 1, C)
+
+    # dont divide by zero
+    eq_idxs = maximum == minimum
+    diff = maximum - minimum
+    diff[eq_idxs] = 1.0
+    minimum[eq_idxs] = 0.0
+
+    # values in (N, 1, 1, C) layout
+    scale = (_max_value(img_tensor.dtype) / diff).contiguous()
+    base = minimum.contiguous()
+
+    # now we can create the tensors for CV-CUDA to use in normalize
+    base_tensor = cvcuda.as_tensor(base, "NHWC")
+    scale_tensor = cvcuda.as_tensor(scale, "NHWC")
+    return cvcuda.normalize(image, base=base_tensor, scale=scale_tensor, globalscale=1.0, globalshift=0.0)
+
+
+if CVCUDA_AVAILABLE:
+    _register_kernel_internal(autocontrast, _import_cvcuda().Tensor)(_autocontrast_cvcuda)
+
+
 def equalize(inpt: torch.Tensor) -> torch.Tensor:
     """See :class:`~torchvision.transforms.v2.RandomEqualize` for details."""
     if torch.jit.is_scripting():
