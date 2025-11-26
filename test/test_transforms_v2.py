@@ -2753,12 +2753,10 @@ class TestToDtype:
         out = F.to_dtype(input, dtype=output_dtype, scale=scale)
 
         if make_input == make_image_cvcuda:
-            expected = self.reference_convert_dtype_image_tensor(
-                F.cvcuda_to_tensor(input), dtype=output_dtype, scale=scale
-            )
+            input = F.cvcuda_to_tensor(input)
             out = F.cvcuda_to_tensor(out)
-        else:
-            expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
+
+        expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
 
         atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
         torch.testing.assert_close(out, expected, rtol=0, atol=atol)
