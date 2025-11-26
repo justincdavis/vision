@@ -400,24 +400,17 @@ def _to_dtype_cvcuda(
     dtype_in = _cvcuda_to_torch_dtypes[inpt.dtype]
     cvc_dtype = _torch_to_cvcuda_dtypes[dtype]
 
-    if not scale:
-        return cvcuda.convertto(inpt, dtype=cvc_dtype)
-
     scale_val, offset = 1.0, 0.0
-    in_dtype_float = dtype_in.is_floating_point
-    out_dtype_float = dtype.is_floating_point
+    if scale:
+        in_dtype_float = dtype_in.is_floating_point
+        out_dtype_float = dtype.is_floating_point
 
-    # four cases for the scaling setup
-    # 1. float -> float
-    # 2. int -> int
-    # 3. float -> int
-    # 4. int -> float
-    if in_dtype_float == out_dtype_float:
-        scale_val, offset = 1.0, 0.0
-    elif in_dtype_float and not out_dtype_float:
-        scale_val, offset = float(_max_value(dtype)), 0.0
-    else:
-        scale_val, offset = 1.0 / float(_max_value(dtype_in)), 0.0
+        if in_dtype_float == out_dtype_float:
+            scale_val, offset = 1.0, 0.0
+        elif in_dtype_float and not out_dtype_float:
+            scale_val, offset = float(_max_value(dtype)), 0.0
+        else:
+            scale_val, offset = 1.0 / float(_max_value(dtype_in)), 0.0
 
     return cvcuda.convertto(
         inpt,
