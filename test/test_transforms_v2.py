@@ -2748,8 +2748,6 @@ class TestToDtype:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
             pytest.xfail("uint8 to uint16 conversion is not supported on cuda")
-        if input_dtype == torch.uint8 and output_dtype == torch.uint16 and scale and make_input == make_image_cvcuda:
-            pytest.xfail("uint8 to uint16 conversion with scale is not supported in F._misc._to_dtype_cvcuda")
 
         input = make_input(dtype=input_dtype, device=device)
         out = F.to_dtype(input, dtype=output_dtype, scale=scale)

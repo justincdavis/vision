@@ -388,7 +388,9 @@ def _to_dtype_cvcuda(
             4. int -> float
             If scale is True, the values will be scaled to the new dtype.
             If scale is False, the values will not be scaled.
-            The scale values for float -> float and int -> int are 1.0 and 0.0 respectively.
+            The scale values for float -> float are 1.0 and 0.0 respectively.
+            The scale values for int -> int are 2^(bit_diff) of the new dtype.
+            Where bit_diff is the difference in the number of bits of the new dtype and the input dtype.
             The scale values for float -> int and int -> float are the maximum value of the new dtype.
 
     Returns:
@@ -405,8 +407,13 @@ def _to_dtype_cvcuda(
         in_dtype_float = dtype_in.is_floating_point
         out_dtype_float = dtype.is_floating_point
 
-        if in_dtype_float == out_dtype_float:
+        if in_dtype_float and out_dtype_float:
             scale_val, offset = 1.0, 0.0
+        elif not in_dtype_float and not out_dtype_float:
+            in_bits = torch.iinfo(dtype_in).bits
+            out_bits = torch.iinfo(dtype).bits
+            scale_val = float(2 ** (out_bits - in_bits))
+            offset = 0.0
         elif in_dtype_float and not out_dtype_float:
             scale_val, offset = float(_max_value(dtype)), 0.0
         else:
