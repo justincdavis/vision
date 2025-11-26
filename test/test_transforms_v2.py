@@ -6115,7 +6115,18 @@ class TestAdjustGamma:
     def test_kernel_video(self):
         check_kernel(F.adjust_gamma_video, make_video(), gamma=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_gamma, make_input(), gamma=0.5)
 
@@ -6126,21 +6137,44 @@ class TestAdjustGamma:
             (F._color._adjust_gamma_image_pil, PIL.Image.Image),
             (F.adjust_gamma_image, tv_tensors.Image),
             (F.adjust_gamma_video, tv_tensors.Video),
+            pytest.param(
+                F._color._adjust_gamma_cvcuda,
+                "cvcuda.Tensor",
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.adjust_gamma, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
         with pytest.raises(ValueError, match="Gamma should be a non-negative real number"):
             F.adjust_gamma(make_image(), gamma=-1)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("gamma", [0.1, 0.5, 1.0])
     @pytest.mark.parametrize("gain", [0.1, 1.0, 2.0])
-    def test_correctness_image(self, gamma, gain):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, gamma, gain):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.adjust_gamma(image, gamma=gamma, gain=gain)
+
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            actual = actual.squeeze(0)
+            image = F.cvcuda_to_tensor(image)
+            image = image.squeeze(0)
+
         expected = F.to_image(F.adjust_gamma(F.to_pil_image(image), gamma=gamma, gain=gain))
 
         assert_equal(actual, expected)
