@@ -24,6 +24,7 @@ from common_utils import (
     assert_equal,
     cache,
     cpu_and_cuda,
+    cvcuda_to_pil_compatible_tensor,
     freeze_rng_state,
     ignore_jit_no_profile_information_warning,
     make_bounding_boxes,
@@ -6427,11 +6428,7 @@ class TestRgbToGrayscale:
         actual = fn(image, num_output_channels=num_output_channels)
 
         if make_input is make_image_cvcuda:
-            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
-            actual = actual.squeeze(0)
-            # drop the batch dimension
-            image = F.cvcuda_to_tensor(image).to(device="cpu")
-            image = image.squeeze(0)
+            image = cvcuda_to_pil_compatible_tensor(image)
 
         expected = F.to_image(F.rgb_to_grayscale(F.to_pil_image(image), num_output_channels=num_output_channels))
 
@@ -6532,11 +6529,7 @@ class TestGrayscaleToRgb:
         actual = fn(image)
 
         if make_input is make_image_cvcuda:
-            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
-            actual = actual.squeeze(0)
-            # drop the batch dimension
-            image = F.cvcuda_to_tensor(image).to(device="cpu")
-            image = image.squeeze(0)
+            image = cvcuda_to_pil_compatible_tensor(image)
 
         expected = F.to_image(F.grayscale_to_rgb(F.to_pil_image(image)))
 
