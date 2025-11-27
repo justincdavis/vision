@@ -299,15 +299,12 @@ class ImagePair(TensorLikePair):
     ):
         if all(isinstance(input, PIL.Image.Image) for input in [actual, expected]):
             actual, expected = (to_image(input) for input in [actual, expected])
-
-        if CVCUDA_AVAILABLE and all(isinstance(input, _import_cvcuda().Tensor) for input in [actual, expected]):
+        elif CVCUDA_AVAILABLE and all(isinstance(input, _import_cvcuda().Tensor) for input in [actual, expected]):
             actual, expected = (cvcuda_to_tensor(input) for input in [actual, expected])
-
-        if CVCUDA_AVAILABLE and isinstance(actual, _import_cvcuda().Tensor) and isinstance(expected, PIL.Image.Image):
+        elif CVCUDA_AVAILABLE and isinstance(actual, _import_cvcuda().Tensor) and isinstance(expected, PIL.Image.Image):
             actual = cvcuda_to_pil_compatible_tensor(actual)
             expected = to_image(expected)
-
-        if CVCUDA_AVAILABLE and isinstance(actual, _import_cvcuda().Tensor):
+        elif CVCUDA_AVAILABLE and isinstance(actual, _import_cvcuda().Tensor):
             actual = cvcuda_to_pil_compatible_tensor(actual)
 
         super().__init__(actual, expected, **other_parameters)
