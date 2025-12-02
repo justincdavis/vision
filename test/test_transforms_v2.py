@@ -2670,10 +2670,10 @@ class TestToDtype:
     @pytest.mark.parametrize("scale", (True, False))
     @pytest.mark.parametrize("as_dict", (True, False))
     def test_transform(self, make_input, input_dtype, output_dtype, device, scale, as_dict):
-        input = make_input(dtype=input_dtype, device=device)
+        inpt = make_input(dtype=input_dtype, device=device)
         if as_dict:
-            output_dtype = {type(input): output_dtype}
-        check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), input, check_sample_input=not as_dict)
+            output_dtype = {type(inpt): output_dtype}
+        check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), inpt, check_sample_input=not as_dict)
 
     def reference_convert_dtype_image_tensor(self, image, dtype=torch.float, scale=False):
         input_dtype = image.dtype
@@ -2749,14 +2749,14 @@ class TestToDtype:
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
             pytest.xfail("uint8 to uint16 conversion is not supported on cuda")
 
-        input = make_input(dtype=input_dtype, device=device)
-        out = F.to_dtype(input, dtype=output_dtype, scale=scale)
+        inpt = make_input(dtype=input_dtype, device=device)
+        out = F.to_dtype(inpt, dtype=output_dtype, scale=scale)
 
         if make_input == make_image_cvcuda:
-            input = F.cvcuda_to_tensor(input)
+            inpt = F.cvcuda_to_tensor(inpt)
             out = F.cvcuda_to_tensor(out)
 
-        expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
+        expected = self.reference_convert_dtype_image_tensor(inpt, dtype=output_dtype, scale=scale)
 
         atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
         torch.testing.assert_close(out, expected, rtol=0, atol=atol)
