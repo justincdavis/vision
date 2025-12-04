@@ -1,9 +1,12 @@
 import functools
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torchvision import tv_tensors
+
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
 
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
