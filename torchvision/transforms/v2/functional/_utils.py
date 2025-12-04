@@ -212,12 +212,18 @@ def _populate_cvcuda_dtype_tables():
 
 
 def _get_cvcuda_type_from_torch_dtype(dtype: torch.dtype) -> "cvcuda.Type":
-    if len(_torch_to_cvcuda_dtypes.keys()) == 0:
+    if len(_torch_to_cvcuda_dtypes) == 0:
         _populate_cvcuda_dtype_tables()
-    return _torch_to_cvcuda_dtypes[dtype]
+    cv_type = _torch_to_cvcuda_dtypes.get(dtype)
+    if cv_type is None:
+        raise ValueError(f"No CV-CUDA type found for torch dtype {dtype}")
+    return cv_type
 
 
 def _get_torch_dtype_from_cvcuda_type(dtype: "cvcuda.Type") -> torch.dtype:
-    if len(_cvcuda_to_torch_dtypes.keys()) == 0:
+    if len(_cvcuda_to_torch_dtypes) == 0:
         _populate_cvcuda_dtype_tables()
-    return _cvcuda_to_torch_dtypes[dtype]
+    torch_dtype = _cvcuda_to_torch_dtypes.get(dtype)
+    if torch_dtype is None:
+        raise ValueError(f"No torch dtype found for CV-CUDA type {dtype}")
+    return torch_dtype
