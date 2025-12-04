@@ -177,3 +177,44 @@ def _is_cvcuda_tensor(inpt: Any) -> bool:
         return isinstance(inpt, cvcuda.Tensor)
     except ImportError:
         return False
+
+
+# cvcuda is only used if it is installed, so we can simply define empty mappings
+_torch_to_cvcuda_dtypes: dict[torch.dtype, "cvcuda.Type"] = {}
+_cvcuda_to_torch_dtypes: dict["cvcuda.Type", torch.dtype] = {}
+
+
+def _populate_cvcuda_dtype_tables():
+    cvcuda = _import_cvcuda()
+
+    global _torch_to_cvcuda_dtypes
+    global _cvcuda_to_torch_dtypes
+
+    # put the entire conversion set here
+    # only a subset are used for torchvision
+    _torch_to_cvcuda_dtypes = {
+        torch.uint8: cvcuda.Type.U8,
+        torch.uint16: cvcuda.Type.U16,
+        torch.uint32: cvcuda.Type.U32,
+        torch.uint64: cvcuda.Type.U64,
+        torch.int8: cvcuda.Type.S8,
+        torch.int16: cvcuda.Type.S16,
+        torch.int32: cvcuda.Type.S32,
+        torch.int64: cvcuda.Type.S64,
+        torch.float32: cvcuda.Type.F32,
+        torch.float64: cvcuda.Type.F64,
+    }
+    # create reverse mapping
+    _cvcuda_to_torch_dtypes = {v: k for k, v in _torch_to_cvcuda_dtypes.items()}
+
+
+def _get_cvcuda_type_from_torch_dtype(dtype: torch.dtype) -> "cvcuda.Type":
+    if len(_torch_to_cvcuda_dtypes.keys()) == 0:
+        _populate_cvcuda_dtype_tables()
+    return _torch_to_cvcuda_dtypes[dtype]
+
+
+def _get_torch_dtype_from_cvcuda_type(dtype: "cvcuda.Type") -> torch.dtype:
+    if len(_cvcuda_to_torch_dtypes.keys()) == 0:
+        _populate_cvcuda_dtype_tables()
+    return _cvcuda_to_torch_dtypes[dtype]
