@@ -369,7 +369,7 @@ if CVCUDA_AVAILABLE:
     _cvcuda_to_torch_dtypes = {v: k for k, v in _torch_to_cvcuda_dtypes.items()}
 
 
-def _to_dtype_cvcuda(
+def _to_dtype_image_cvcuda(
     inpt: "cvcuda.Tensor",
     dtype: torch.dtype,
     scale: bool = False,
@@ -428,7 +428,7 @@ def _to_dtype_cvcuda(
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(to_dtype, _import_cvcuda().Tensor)(_to_dtype_cvcuda)
+    _register_kernel_internal(to_dtype, _import_cvcuda().Tensor)(_to_dtype_image_cvcuda)
 
 
 def sanitize_bounding_boxes(
