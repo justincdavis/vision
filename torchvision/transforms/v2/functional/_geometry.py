@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, Union, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import numpy as np
 import PIL.Image
@@ -29,8 +29,8 @@ from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_b
 
 from ._utils import (
     _FillTypeJIT,
-    _get_cvcuda_interp,
     _get_cvcuda_border_from_pad_mode,
+    _get_cvcuda_interp,
     _get_kernel,
     _import_cvcuda,
     _is_cvcuda_available,
@@ -679,32 +679,6 @@ def resize_video(
     antialias: Optional[bool] = True,
 ) -> torch.Tensor:
     return resize_image(video, size=size, interpolation=interpolation, max_size=max_size, antialias=antialias)
-
-
-def _resize_image_cvcuda(
-    image: "cvcuda.Tensor",
-    size: Optional[list[int]],
-    interpolation: Union[InterpolationMode, int] = InterpolationMode.BILINEAR,
-    max_size: Optional[int] = None,
-    antialias: Optional[bool] = True,
-) -> "cvcuda.Tensor":
-    # placeholder func for now, will be handled in PR for resize alone
-    # since placeholder convert to from torch tensor and use resize_image
-    from ._type_conversion import cvcuda_to_tensor, to_cvcuda_tensor
-
-    return to_cvcuda_tensor(
-        resize_image(
-            cvcuda_to_tensor(image),
-            size=size,
-            interpolation=interpolation,
-            max_size=max_size,
-            antialias=antialias,
-        )
-    )
-
-
-if CVCUDA_AVAILABLE:
-    _register_kernel_internal(resize, _import_cvcuda().Tensor)(_resize_image_cvcuda)
 
 
 def affine(

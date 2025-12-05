@@ -1,15 +1,24 @@
+from typing import TYPE_CHECKING
+
 import PIL.Image
 import torch
 from torch.nn.functional import conv2d
 from torchvision import tv_tensors
 from torchvision.transforms import _functional_pil as _FP
 from torchvision.transforms._functional_tensor import _max_value
+from torchvision.transforms.v2.functional._utils import _import_cvcuda, _is_cvcuda_available
 
 from torchvision.utils import _log_api_usage_once
 
 from ._misc import _num_value_bits, to_dtype_image
 from ._type_conversion import pil_to_tensor, to_pil_image
 from ._utils import _get_kernel, _register_kernel_internal
+
+
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
 
 
 def rgb_to_grayscale(inpt: torch.Tensor, num_output_channels: int = 1) -> torch.Tensor:
@@ -245,6 +254,8 @@ def adjust_saturation_video(video: torch.Tensor, saturation_factor: float) -> to
 
 
 def _adjust_saturation_image_cvcuda(image: "cvcuda.Tensor", saturation_factor: float) -> "cvcuda.Tensor":
+    cvcuda = _import_cvcuda()
+
     if saturation_factor < 0:
         raise ValueError(f"saturation_factor ({saturation_factor}) is not non-negative.")
 
@@ -272,7 +283,7 @@ def _adjust_saturation_image_cvcuda(image: "cvcuda.Tensor", saturation_factor: f
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(adjust_saturation, cvcuda.Tensor)(_adjust_saturation_image_cvcuda)
+    _register_kernel_internal(adjust_saturation, _import_cvcuda().Tensor)(_adjust_saturation_image_cvcuda)
 
 
 def adjust_contrast(inpt: torch.Tensor, contrast_factor: float) -> torch.Tensor:
