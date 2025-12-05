@@ -968,6 +968,9 @@ class RandomPerspective(_RandomApplyTransform):
 
     _v1_transform_cls = _transforms.RandomPerspective
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = _RandomApplyTransform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(
         self,
         distortion_scale: float = 0.5,
