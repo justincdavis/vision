@@ -624,6 +624,9 @@ class RandomRotation(Transform):
 
     _v1_transform_cls = _transforms.RandomRotation
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(
         self,
         degrees: Union[numbers.Number, Sequence],
