@@ -3662,6 +3662,9 @@ class TestCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_functional(self, make_input):
@@ -3677,16 +3680,36 @@ class TestCrop:
             (F.crop_mask, tv_tensors.Mask),
             (F.crop_video, tv_tensors.Video),
             (F.crop_keypoints, tv_tensors.KeyPoints),
+            pytest.param(
+                F._geometry._crop_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is F._geometry._crop_image_cvcuda:
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.crop, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("kwargs", CORRECTNESS_CROP_KWARGS)
-    def test_functional_image_correctness(self, kwargs):
-        image = make_image(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
+    def test_functional_image_correctness(self, kwargs, make_input):
+        image = make_input(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
 
         actual = F.crop(image, **kwargs)
+
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
+
         expected = F.to_image(F.crop(F.to_pil_image(image), **kwargs))
 
         assert_equal(actual, expected)
@@ -3705,15 +3728,18 @@ class TestCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_transform(self, param, value, make_input):
-        input = make_input(self.INPUT_SIZE)
+        input_data = make_input(self.INPUT_SIZE)
 
         check_sample_input = True
         if param == "fill":
             if isinstance(value, (tuple, list)):
-                if isinstance(input, tv_tensors.Mask):
+                if isinstance(input_data, tv_tensors.Mask):
                     pytest.skip("F.pad_mask doesn't support non-scalar fill.")
                 else:
                     check_sample_input = False
@@ -3722,14 +3748,14 @@ class TestCrop:
                 # 1. size is required
                 # 2. the fill parameter only has an affect if we need padding
                 size=[s + 4 for s in self.INPUT_SIZE],
-                fill=adapt_fill(value, dtype=input.dtype if isinstance(input, torch.Tensor) else torch.uint8),
+                fill=adapt_fill(value, dtype=input_data.dtype if isinstance(input_data, torch.Tensor) else torch.uint8),
             )
         else:
             kwargs = {param: value}
 
         check_transform(
             transforms.RandomCrop(**kwargs, pad_if_needed=True),
-            input,
+            input_data,
             check_v1_compatibility=param != "fill" or isinstance(value, (int, float)),
             check_sample_input=check_sample_input,
         )
@@ -3771,7 +3797,16 @@ class TestCrop:
         padding_mode=["constant", "edge", "reflect", "symmetric"],
     )
     @pytest.mark.parametrize("seed", list(range(5)))
-    def test_transform_image_correctness(self, param, value, seed):
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
+    def test_transform_image_correctness(self, param, value, seed, make_input):
         kwargs = {param: value}
         if param != "size":
             # 1. size is required
@@ -3782,16 +3817,29 @@ class TestCrop:
 
         transform = transforms.RandomCrop(pad_if_needed=True, **kwargs)
 
-        image = make_image(self.INPUT_SIZE)
+        will_pad = False
+        if kwargs["size"][0] > self.INPUT_SIZE[0] or kwargs["size"][1] > self.INPUT_SIZE[1]:
+            will_pad = True
+
+        image = make_input(self.INPUT_SIZE)
 
         with freeze_rng_state():
             torch.manual_seed(seed)
             actual = transform(image)
 
             torch.manual_seed(seed)
+
+            if make_input is make_image_cvcuda:
+                image = F.cvcuda_to_tensor(image)[0].cpu()
+
             expected = F.to_image(transform(F.to_pil_image(image)))
 
-        assert_equal(actual, expected)
+        if make_input == make_image_cvcuda and will_pad:
+            # when padding is applied, CV-CUDA will always fill with zeros
+            # cannot use assert_equal since it will fail unless random is all zeros
+            assert_close(actual, expected, rtol=0, atol=get_max_value(image.dtype))
+        else:
+            assert_equal(actual, expected)
 
     def _reference_crop_bounding_boxes(self, bounding_boxes, *, top, left, height, width):
         affine_matrix = np.array(
@@ -4615,6 +4663,9 @@ class TestResizedCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_functional(self, make_input):
@@ -4631,9 +4682,16 @@ class TestResizedCrop:
             (F.resized_crop_mask, tv_tensors.Mask),
             (F.resized_crop_video, tv_tensors.Video),
             (F.resized_crop_keypoints, tv_tensors.KeyPoints),
+            pytest.param(
+                F._geometry._resized_crop_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is F._geometry._resized_crop_image_cvcuda:
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.resized_crop, kernel=kernel, input_type=input_type)
 
     @param_value_parametrization(
@@ -4650,6 +4708,9 @@ class TestResizedCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_transform(self, param, value, make_input):
@@ -4661,20 +4722,37 @@ class TestResizedCrop:
 
     # `InterpolationMode.NEAREST` is modeled after the buggy `INTER_NEAREST` interpolation of CV2.
     # The PIL equivalent of `InterpolationMode.NEAREST` is `InterpolationMode.NEAREST_EXACT`
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("interpolation", set(INTERPOLATION_MODES) - {transforms.InterpolationMode.NEAREST})
-    def test_functional_image_correctness(self, interpolation):
-        image = make_image(self.INPUT_SIZE, dtype=torch.uint8)
+    def test_functional_image_correctness(self, make_input, interpolation):
+        image = make_input(self.INPUT_SIZE, dtype=torch.uint8)
 
         actual = F.resized_crop(
             image, **self.CROP_KWARGS, size=self.OUTPUT_SIZE, interpolation=interpolation, antialias=True
         )
+
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
+
         expected = F.to_image(
             F.resized_crop(
                 F.to_pil_image(image), **self.CROP_KWARGS, size=self.OUTPUT_SIZE, interpolation=interpolation
             )
         )
 
-        torch.testing.assert_close(actual, expected, atol=1, rtol=0)
+        atol = 1
+        if make_input is make_image_cvcuda and interpolation == transforms.InterpolationMode.BICUBIC:
+            # CV-CUDA BICUBIC differs from PIL ground truth BICUBIC
+            atol = 10
+        assert_close(actual, expected, atol=atol, rtol=0)
 
     def _reference_resized_crop_bounding_boxes(self, bounding_boxes, *, top, left, height, width, size):
         new_height, new_width = size
@@ -5085,6 +5163,9 @@ class TestCenterCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_functional(self, make_input):
@@ -5100,9 +5181,16 @@ class TestCenterCrop:
             (F.center_crop_mask, tv_tensors.Mask),
             (F.center_crop_video, tv_tensors.Video),
             (F.center_crop_keypoints, tv_tensors.KeyPoints),
+            pytest.param(
+                F._geometry._center_crop_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is F._geometry._center_crop_image_cvcuda:
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.center_crop, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -5115,17 +5203,33 @@ class TestCenterCrop:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
         ],
     )
     def test_transform(self, make_input):
         check_transform(transforms.CenterCrop(self.OUTPUT_SIZES[0]), make_input(self.INPUT_SIZE))
 
     @pytest.mark.parametrize("output_size", OUTPUT_SIZES)
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("fn", [F.center_crop, transform_cls_to_functional(transforms.CenterCrop)])
-    def test_image_correctness(self, output_size, fn):
-        image = make_image(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
+    def test_image_correctness(self, output_size, make_input, fn):
+        image = make_input(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
 
         actual = fn(image, output_size)
+
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
+
         expected = F.to_image(F.center_crop(F.to_pil_image(image), output_size=output_size))
 
         assert_equal(actual, expected)
@@ -6572,7 +6676,15 @@ class TestFiveTenCrop:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
     )
     @pytest.mark.parametrize("functional", [F.five_crop, F.ten_crop])
     def test_functional(self, make_input, functional):
@@ -6590,13 +6702,27 @@ class TestFiveTenCrop:
             (F.five_crop, F._geometry._five_crop_image_pil, PIL.Image.Image),
             (F.five_crop, F.five_crop_image, tv_tensors.Image),
             (F.five_crop, F.five_crop_video, tv_tensors.Video),
+            pytest.param(
+                F.five_crop,
+                F._geometry._five_crop_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
             (F.ten_crop, F.ten_crop_image, torch.Tensor),
             (F.ten_crop, F._geometry._ten_crop_image_pil, PIL.Image.Image),
             (F.ten_crop, F.ten_crop_image, tv_tensors.Image),
             (F.ten_crop, F.ten_crop_video, tv_tensors.Video),
+            pytest.param(
+                F.ten_crop,
+                F._geometry._ten_crop_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
         ],
     )
     def test_functional_signature(self, functional, kernel, input_type):
+        if kernel is F._geometry._five_crop_image_cvcuda or kernel is F._geometry._ten_crop_image_cvcuda:
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(functional, kernel=kernel, input_type=input_type)
 
     class _TransformWrapper(nn.Module):
@@ -6618,7 +6744,15 @@ class TestFiveTenCrop:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
     )
     @pytest.mark.parametrize("transform_cls", [transforms.FiveCrop, transforms.TenCrop])
     def test_transform(self, make_input, transform_cls):
@@ -6636,19 +6770,41 @@ class TestFiveTenCrop:
         with pytest.raises(TypeError, match="not supported"):
             transform(make_input(self.INPUT_SIZE))
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("fn", [F.five_crop, transform_cls_to_functional(transforms.FiveCrop)])
-    def test_correctness_image_five_crop(self, fn):
-        image = make_image(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
+    def test_correctness_image_five_crop(self, make_input, fn):
+        image = make_input(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
 
         actual = fn(image, size=self.OUTPUT_SIZE)
+
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
+
         expected = F.five_crop(F.to_pil_image(image), size=self.OUTPUT_SIZE)
 
         assert isinstance(actual, tuple)
         assert_equal(actual, [F.to_image(e) for e in expected])
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("fn_or_class", [F.ten_crop, transforms.TenCrop])
     @pytest.mark.parametrize("vertical_flip", [False, True])
-    def test_correctness_image_ten_crop(self, fn_or_class, vertical_flip):
+    def test_correctness_image_ten_crop(self, make_input, fn_or_class, vertical_flip):
         if fn_or_class is transforms.TenCrop:
             fn = transform_cls_to_functional(fn_or_class, size=self.OUTPUT_SIZE, vertical_flip=vertical_flip)
             kwargs = dict()
@@ -6656,9 +6812,13 @@ class TestFiveTenCrop:
             fn = fn_or_class
             kwargs = dict(size=self.OUTPUT_SIZE, vertical_flip=vertical_flip)
 
-        image = make_image(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
+        image = make_input(self.INPUT_SIZE, dtype=torch.uint8, device="cpu")
 
         actual = fn(image, **kwargs)
+
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
+
         expected = F.ten_crop(F.to_pil_image(image), size=self.OUTPUT_SIZE, vertical_flip=vertical_flip)
 
         assert isinstance(actual, tuple)

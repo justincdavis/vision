@@ -139,6 +139,9 @@ class Resize(Transform):
 
     _v1_transform_cls = _transforms.Resize
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(
         self,
         size: Union[int, Sequence[int], None],
@@ -193,6 +196,9 @@ class CenterCrop(Transform):
     """
 
     _v1_transform_cls = _transforms.CenterCrop
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(self, size: Union[int, Sequence[int]]):
         super().__init__()
@@ -251,6 +257,9 @@ class RandomResizedCrop(Transform):
     """
 
     _v1_transform_cls = _transforms.RandomResizedCrop
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(
         self,
@@ -360,6 +369,9 @@ class FiveCrop(Transform):
 
     _v1_transform_cls = _transforms.FiveCrop
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(self, size: Union[int, Sequence[int]]) -> None:
         super().__init__()
         self.size = _setup_size(size, error_msg="Please provide only two dimensions (h, w) for size.")
@@ -403,6 +415,9 @@ class TenCrop(Transform):
     """
 
     _v1_transform_cls = _transforms.TenCrop
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(self, size: Union[int, Sequence[int]], vertical_flip: bool = False) -> None:
         super().__init__()
@@ -814,6 +829,9 @@ class RandomCrop(Transform):
 
     _v1_transform_cls = _transforms.RandomCrop
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def _extract_params_for_v1_transform(self) -> dict[str, Any]:
         params = super()._extract_params_for_v1_transform()
 
@@ -1124,6 +1142,9 @@ class RandomIoUCrop(Transform):
             Default, 40.
     """
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(
         self,
         min_scale: float = 0.3,
@@ -1404,6 +1425,9 @@ class RandomResize(Transform):
             The default value changed from ``None`` to ``True`` in
             v0.17, for the PIL and Tensor backends to be consistent.
     """
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(
         self,
