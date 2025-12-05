@@ -216,6 +216,7 @@ def _get_cvcuda_interp(interpolation: InterpolationMode | str | int) -> "cvcuda.
 
     return interp
 
+
 # cvcuda is only used if it is installed, so we can simply define empty mappings
 _torch_to_cvcuda_dtypes: dict[torch.dtype, "cvcuda.Type"] = {}
 _cvcuda_to_torch_dtypes: dict["cvcuda.Type", torch.dtype] = {}
@@ -276,3 +277,9 @@ def _get_cvcuda_border_from_pad_mode(pad_mode: str) -> "cvcuda.Border":
         raise ValueError(f"Pad mode {pad_mode} is not supported with CV-CUDA")
 
     return border_mode
+
+
+def _get_stream_for_cvcuda() -> "cvcuda.Stream":
+    cvcuda = _import_cvcuda()
+
+    return cvcuda.as_stream(torch.cuda.current_stream())
