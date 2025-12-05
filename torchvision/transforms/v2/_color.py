@@ -26,6 +26,9 @@ class Grayscale(Transform):
 
     _v1_transform_cls = _transforms.Grayscale
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(self, num_output_channels: int = 1):
         super().__init__()
         self.num_output_channels = num_output_channels
@@ -48,6 +51,9 @@ class RandomGrayscale(_RandomApplyTransform):
 
     _v1_transform_cls = _transforms.RandomGrayscale
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = _RandomApplyTransform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(self, p: float = 0.1) -> None:
         super().__init__(p=p)
 
@@ -65,6 +71,9 @@ class RGB(Transform):
     If the input is a :class:`torch.Tensor`, it is expected
     to have [..., 1 or 3, H, W] shape, where ... means an arbitrary number of leading dimensions
     """
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(self):
         super().__init__()
