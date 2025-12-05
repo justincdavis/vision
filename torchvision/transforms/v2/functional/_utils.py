@@ -8,9 +8,12 @@ from torchvision.transforms.functional import InterpolationMode
 
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
+<<<<<<< HEAD
 
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
+=======
+>>>>>>> feat/elastic_cvcuda
 
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
