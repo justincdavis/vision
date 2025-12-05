@@ -1,9 +1,12 @@
 import functools
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torchvision import tv_tensors
+
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
 
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
@@ -177,3 +180,9 @@ def _is_cvcuda_tensor(inpt: Any) -> bool:
         return isinstance(inpt, cvcuda.Tensor)
     except ImportError:
         return False
+
+
+def _get_stream_for_cvcuda() -> "cvcuda.Stream":
+    cvcuda = _import_cvcuda()
+
+    return cvcuda.as_stream(torch.cuda.current_stream())

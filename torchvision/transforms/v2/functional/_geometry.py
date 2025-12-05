@@ -29,6 +29,7 @@ from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_b
 from ._utils import (
     _FillTypeJIT,
     _get_kernel,
+    _get_stream_for_cvcuda,
     _import_cvcuda,
     _is_cvcuda_available,
     _register_five_ten_crop_kernel_internal,
@@ -74,7 +75,11 @@ def _horizontal_flip_image_pil(image: PIL.Image.Image) -> PIL.Image.Image:
 
 
 def _horizontal_flip_image_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
-    return _import_cvcuda().flip(image, flipCode=1)
+    cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
+    result = cvcuda.flip(image, flipCode=1, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -170,7 +175,11 @@ def _vertical_flip_image_pil(image: PIL.Image.Image) -> PIL.Image.Image:
 
 
 def _vertical_flip_image_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
-    return _import_cvcuda().flip(image, flipCode=0)
+    cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
+    result = cvcuda.flip(image, flipCode=0, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
