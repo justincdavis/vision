@@ -215,8 +215,6 @@ def _get_cvcuda_interp(interpolation: InterpolationMode | str | int) -> "cvcuda.
         raise ValueError(f"Interpolation mode {interpolation} is not supported with CV-CUDA")
 
     return interp
-<<<<<<< HEAD
-
 
 # cvcuda is only used if it is installed, so we can simply define empty mappings
 _torch_to_cvcuda_dtypes: dict[torch.dtype, "cvcuda.Type"] = {}
@@ -278,5 +276,3 @@ def _get_cvcuda_border_from_pad_mode(pad_mode: str) -> "cvcuda.Border":
         raise ValueError(f"Pad mode {pad_mode} is not supported with CV-CUDA")
 
     return border_mode
-=======
->>>>>>> feat/perspective_cvcuda

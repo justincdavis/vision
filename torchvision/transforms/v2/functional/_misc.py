@@ -1,5 +1,9 @@
 import math
+<<<<<<< HEAD
 from typing import List, Optional, Tuple, TYPE_CHECKING
+=======
+from typing import Optional
+>>>>>>> feat/resize_cvcuda
 
 import PIL.Image
 import torch
