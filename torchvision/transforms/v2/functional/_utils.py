@@ -9,6 +9,9 @@ from torchvision.transforms.functional import InterpolationMode
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
 
+if TYPE_CHECKING:
+    import cvcuda  # type: ignore[import-not-found]
+
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
 
@@ -215,3 +218,46 @@ def _get_cvcuda_interp(interpolation: InterpolationMode | str | int) -> "cvcuda.
         raise ValueError(f"Interpolation mode {interpolation} is not supported with CV-CUDA")
 
     return interp
+
+
+# cvcuda is only used if it is installed, so we can simply define empty mappings
+_torch_to_cvcuda_dtypes: dict[torch.dtype, "cvcuda.Type"] = {}
+_cvcuda_to_torch_dtypes: dict["cvcuda.Type", torch.dtype] = {}
+
+
+def _get_cvcuda_type_from_torch_dtype(dtype: torch.dtype) -> "cvcuda.Type":
+    if len(_torch_to_cvcuda_dtypes) == 0:
+        cvcuda = _import_cvcuda()
+        _torch_to_cvcuda_dtypes[torch.uint8] = cvcuda.Type.U8
+        _torch_to_cvcuda_dtypes[torch.uint16] = cvcuda.Type.U16
+        _torch_to_cvcuda_dtypes[torch.uint32] = cvcuda.Type.U32
+        _torch_to_cvcuda_dtypes[torch.uint64] = cvcuda.Type.U64
+        _torch_to_cvcuda_dtypes[torch.int8] = cvcuda.Type.S8
+        _torch_to_cvcuda_dtypes[torch.int16] = cvcuda.Type.S16
+        _torch_to_cvcuda_dtypes[torch.int32] = cvcuda.Type.S32
+        _torch_to_cvcuda_dtypes[torch.int64] = cvcuda.Type.S64
+        _torch_to_cvcuda_dtypes[torch.float32] = cvcuda.Type.F32
+        _torch_to_cvcuda_dtypes[torch.float64] = cvcuda.Type.F64
+    cv_type = _torch_to_cvcuda_dtypes.get(dtype)
+    if cv_type is None:
+        raise ValueError(f"No CV-CUDA type found for torch dtype {dtype}")
+    return cv_type
+
+
+def _get_torch_dtype_from_cvcuda_type(dtype: "cvcuda.Type") -> torch.dtype:
+    if len(_cvcuda_to_torch_dtypes) == 0:
+        cvcuda = _import_cvcuda()
+        _cvcuda_to_torch_dtypes[cvcuda.Type.U8] = torch.uint8
+        _cvcuda_to_torch_dtypes[cvcuda.Type.U16] = torch.uint16
+        _cvcuda_to_torch_dtypes[cvcuda.Type.U32] = torch.uint32
+        _cvcuda_to_torch_dtypes[cvcuda.Type.U64] = torch.uint64
+        _cvcuda_to_torch_dtypes[cvcuda.Type.S8] = torch.int8
+        _cvcuda_to_torch_dtypes[cvcuda.Type.S16] = torch.int16
+        _cvcuda_to_torch_dtypes[cvcuda.Type.S32] = torch.int32
+        _cvcuda_to_torch_dtypes[cvcuda.Type.S64] = torch.int64
+        _cvcuda_to_torch_dtypes[cvcuda.Type.F32] = torch.float32
+        _cvcuda_to_torch_dtypes[cvcuda.Type.F64] = torch.float64
+    torch_dtype = _cvcuda_to_torch_dtypes.get(dtype)
+    if torch_dtype is None:
+        raise ValueError(f"No torch dtype found for CV-CUDA type {dtype}")
+    return torch_dtype

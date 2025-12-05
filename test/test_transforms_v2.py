@@ -2720,10 +2720,10 @@ class TestToDtype:
     @pytest.mark.parametrize("scale", (True, False))
     @pytest.mark.parametrize("as_dict", (True, False))
     def test_transform(self, make_input, input_dtype, output_dtype, device, scale, as_dict):
-        input = make_input(dtype=input_dtype, device=device)
+        inpt = make_input(dtype=input_dtype, device=device)
         if as_dict:
-            output_dtype = {type(input): output_dtype}
-        check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), input, check_sample_input=not as_dict)
+            output_dtype = {type(inpt): output_dtype}
+        check_transform(transforms.ToDtype(dtype=output_dtype, scale=scale), inpt, check_sample_input=not as_dict)
 
     def reference_convert_dtype_image_tensor(self, image, dtype=torch.float, scale=False):
         input_dtype = image.dtype
@@ -2758,6 +2758,28 @@ class TestToDtype:
 
         return torch.tensor(tree_map(fn, image.tolist())).to(dtype=output_dtype, device=image.device)
 
+    def _get_dtype_conversion_atol(self, input_dtype, output_dtype, scale):
+        is_uint16_to_uint8 = input_dtype == torch.uint16 and output_dtype == torch.uint8
+        is_uint8_to_uint16 = input_dtype == torch.uint8 and output_dtype == torch.uint16
+        changes_type_class = output_dtype.is_floating_point != input_dtype.is_floating_point
+
+        in_bits = torch.iinfo(input_dtype).bits if not input_dtype.is_floating_point else None
+        out_bits = torch.iinfo(output_dtype).bits if not output_dtype.is_floating_point else None
+        expands_bits = in_bits is not None and out_bits is not None and out_bits > in_bits
+
+        if is_uint16_to_uint8:
+            atol = 255
+        elif is_uint8_to_uint16 and not scale:
+            atol = 255
+        elif expands_bits and not scale:
+            atol = 1
+        elif changes_type_class:
+            atol = 1
+        else:
+            atol = 0
+
+        return atol
+
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2779,57 +2801,17 @@ class TestToDtype:
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and scale and make_input == make_image_cvcuda:
             pytest.xfail("uint8 to uint16 conversion with scale is not supported in F._misc._to_dtype_cvcuda")
 
-        input = make_input(dtype=input_dtype, device=device)
-        out = F.to_dtype(input, dtype=output_dtype, scale=scale)
+        inpt = make_input(dtype=input_dtype, device=device)
+        out = F.to_dtype(inpt, dtype=output_dtype, scale=scale)
 
-        if isinstance(input, torch.Tensor):
-            expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
-            if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
-                torch.testing.assert_close(out, expected, atol=1, rtol=0)
-            else:
-                torch.testing.assert_close(out, expected)
-        else:  # cvcuda.Tensor
-            expected = self.reference_convert_dtype_image_tensor(
-                F.cvcuda_to_tensor(input), dtype=output_dtype, scale=scale
-            )
+        if make_input == make_image_cvcuda:
+            inpt = F.cvcuda_to_tensor(inpt)
             out = F.cvcuda_to_tensor(out)
-            # there are some differences in dtype conversion between torchvision and cvcuda
-            # due to different rounding behavior when converting between types with different bit widths
-            # Check if we're converting to a type with more bits (without scaling)
-            in_bits = torch.iinfo(input_dtype).bits if not input_dtype.is_floating_point else None
-            out_bits = torch.iinfo(output_dtype).bits if not output_dtype.is_floating_point else None
 
-            if scale:
-                if input_dtype.is_floating_point and not output_dtype.is_floating_point:
-                    # float -> int with scaling: allow for rounding differences
-                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
-                elif input_dtype == torch.uint16 and output_dtype == torch.uint8:
-                    # uint16 -> uint8 with scaling: allow large differences
-                    torch.testing.assert_close(out, expected, atol=255, rtol=0)
-                else:
-                    torch.testing.assert_close(out, expected)
-            else:
-                if in_bits is not None and out_bits is not None and out_bits > in_bits:
-                    # uint to larger uint without scaling: allow large differences due to bit expansion
-                    if input_dtype == torch.uint8 and output_dtype == torch.uint16:
-                        torch.testing.assert_close(out, expected, atol=255, rtol=0)
-                    else:
-                        torch.testing.assert_close(out, expected, atol=1, rtol=0)
-                elif not input_dtype.is_floating_point and not output_dtype.is_floating_point:
-                    # uint to uint without scaling (same or smaller bits): allow for rounding
-                    if input_dtype == torch.uint16 and output_dtype == torch.uint8:
-                        # uint16 -> uint8 can have large differences due to bit reduction
-                        torch.testing.assert_close(out, expected, atol=255, rtol=0)
-                    else:
-                        torch.testing.assert_close(out, expected)
-                elif input_dtype.is_floating_point and not output_dtype.is_floating_point:
-                    # float -> uint without scaling: allow for rounding differences
-                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
-                elif not input_dtype.is_floating_point and output_dtype.is_floating_point:
-                    # uint -> float without scaling: allow for rounding differences
-                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
-                else:
-                    torch.testing.assert_close(out, expected)
+        expected = self.reference_convert_dtype_image_tensor(inpt, dtype=output_dtype, scale=scale)
+
+        atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
+        torch.testing.assert_close(out, expected, rtol=0, atol=atol)
 
     def was_scaled(self, inpt):
         # this assumes the target dtype is float
