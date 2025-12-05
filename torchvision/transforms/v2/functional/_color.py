@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 import PIL.Image
 import torch
 from torch.nn.functional import conv2d
