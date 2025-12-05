@@ -556,6 +556,23 @@ def adjust_gamma_video(video: torch.Tensor, gamma: float, gain: float = 1) -> to
     return adjust_gamma_image(video, gamma=gamma, gain=gain)
 
 
+def _adjust_gamma_cvcuda(image: "cvcuda.Tensor", gamma: float, gain: float = 1) -> "cvcuda.Tensor":
+    cvcuda = _import_cvcuda()
+
+    # cvcuda.gamma_contrast does not have gain and only support ImageBatchVarShape
+    # use zero-copy torch.tensor here to perform the gamma correction
+    # then go back, no specific layout needed since elementwise
+    # since we can use zero-copy and adjust_gamme_image doesnt need specific layout
+    # just use zero-copy interface here, then back for cvcuda
+    return cvcuda.as_tensor(
+        adjust_gamma_image(torch.as_tensor(image.cuda()), gamma=gamma, gain=gain), cvcuda.TensorLayout.NHWC
+    )
+
+
+if CVCUDA_AVAILABLE:
+    _register_kernel_internal(adjust_gamma, _import_cvcuda().Tensor)(_adjust_gamma_cvcuda)
+
+
 def posterize(inpt: torch.Tensor, bits: int) -> torch.Tensor:
     """See :class:`~torchvision.transforms.v2.RandomPosterize` for details."""
     if torch.jit.is_scripting():

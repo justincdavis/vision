@@ -2627,7 +2627,17 @@ class TestToDtype:
             scale=scale,
         )
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2642,7 +2652,16 @@ class TestToDtype:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_bounding_boxes, make_segmentation_mask, make_video],
+        [
+            make_image_tensor,
+            make_image,
+            make_bounding_boxes,
+            make_segmentation_mask,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
     )
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
@@ -2692,21 +2711,74 @@ class TestToDtype:
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("scale", (True, False))
-    def test_image_correctness(self, input_dtype, output_dtype, device, scale):
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA")
+            ),
+        ],
+    )
+    def test_image_correctness(self, input_dtype, output_dtype, device, scale, make_input):
         if input_dtype.is_floating_point and output_dtype == torch.int64:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
             pytest.xfail("uint8 to uint16 conversion is not supported on cuda")
+        if input_dtype == torch.uint8 and output_dtype == torch.uint16 and scale and make_input == make_image_cvcuda:
+            pytest.xfail("uint8 to uint16 conversion with scale is not supported in F._misc._to_dtype_cvcuda")
 
-        input = make_image(dtype=input_dtype, device=device)
-
+        input = make_input(dtype=input_dtype, device=device)
         out = F.to_dtype(input, dtype=output_dtype, scale=scale)
-        expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
 
-        if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
-            torch.testing.assert_close(out, expected, atol=1, rtol=0)
-        else:
-            torch.testing.assert_close(out, expected)
+        if isinstance(input, torch.Tensor):
+            expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
+            if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
+                torch.testing.assert_close(out, expected, atol=1, rtol=0)
+            else:
+                torch.testing.assert_close(out, expected)
+        else:  # cvcuda.Tensor
+            expected = self.reference_convert_dtype_image_tensor(
+                F.cvcuda_to_tensor(input), dtype=output_dtype, scale=scale
+            )
+            out = F.cvcuda_to_tensor(out)
+            # there are some differences in dtype conversion between torchvision and cvcuda
+            # due to different rounding behavior when converting between types with different bit widths
+            # Check if we're converting to a type with more bits (without scaling)
+            in_bits = torch.iinfo(input_dtype).bits if not input_dtype.is_floating_point else None
+            out_bits = torch.iinfo(output_dtype).bits if not output_dtype.is_floating_point else None
+
+            if scale:
+                if input_dtype.is_floating_point and not output_dtype.is_floating_point:
+                    # float -> int with scaling: allow for rounding differences
+                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
+                elif input_dtype == torch.uint16 and output_dtype == torch.uint8:
+                    # uint16 -> uint8 with scaling: allow large differences
+                    torch.testing.assert_close(out, expected, atol=255, rtol=0)
+                else:
+                    torch.testing.assert_close(out, expected)
+            else:
+                if in_bits is not None and out_bits is not None and out_bits > in_bits:
+                    # uint to larger uint without scaling: allow large differences due to bit expansion
+                    if input_dtype == torch.uint8 and output_dtype == torch.uint16:
+                        torch.testing.assert_close(out, expected, atol=255, rtol=0)
+                    else:
+                        torch.testing.assert_close(out, expected, atol=1, rtol=0)
+                elif not input_dtype.is_floating_point and not output_dtype.is_floating_point:
+                    # uint to uint without scaling (same or smaller bits): allow for rounding
+                    if input_dtype == torch.uint16 and output_dtype == torch.uint8:
+                        # uint16 -> uint8 can have large differences due to bit reduction
+                        torch.testing.assert_close(out, expected, atol=255, rtol=0)
+                    else:
+                        torch.testing.assert_close(out, expected)
+                elif input_dtype.is_floating_point and not output_dtype.is_floating_point:
+                    # float -> uint without scaling: allow for rounding differences
+                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
+                elif not input_dtype.is_floating_point and output_dtype.is_floating_point:
+                    # uint -> float without scaling: allow for rounding differences
+                    torch.testing.assert_close(out, expected, atol=1, rtol=0)
+                else:
+                    torch.testing.assert_close(out, expected)
 
     def was_scaled(self, inpt):
         # this assumes the target dtype is float
@@ -6160,7 +6232,18 @@ class TestAdjustGamma:
     def test_kernel_video(self):
         check_kernel(F.adjust_gamma_video, make_video(), gamma=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_gamma, make_input(), gamma=0.5)
 
@@ -6171,21 +6254,44 @@ class TestAdjustGamma:
             (F._color._adjust_gamma_image_pil, PIL.Image.Image),
             (F.adjust_gamma_image, tv_tensors.Image),
             (F.adjust_gamma_video, tv_tensors.Video),
+            pytest.param(
+                F._color._adjust_gamma_cvcuda,
+                "cvcuda.Tensor",
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available"),
+            ),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
         check_functional_kernel_signature_match(F.adjust_gamma, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
         with pytest.raises(ValueError, match="Gamma should be a non-negative real number"):
             F.adjust_gamma(make_image(), gamma=-1)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image,
+            pytest.param(
+                make_image_cvcuda, marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="CVCUDA not available")
+            ),
+        ],
+    )
     @pytest.mark.parametrize("gamma", [0.1, 0.5, 1.0])
     @pytest.mark.parametrize("gain", [0.1, 1.0, 2.0])
-    def test_correctness_image(self, gamma, gain):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, gamma, gain):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.adjust_gamma(image, gamma=gamma, gain=gain)
+
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).to(device="cpu")
+            actual = actual.squeeze(0)
+            image = F.cvcuda_to_tensor(image)
+            image = image.squeeze(0)
+
         expected = F.to_image(F.adjust_gamma(F.to_pil_image(image), gamma=gamma, gain=gain))
 
         assert_equal(actual, expected)
