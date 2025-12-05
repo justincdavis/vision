@@ -249,6 +249,9 @@ class GaussianNoise(Transform):
             Default is True.
     """
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
+
     def __init__(self, mean: float = 0.0, sigma: float = 0.1, clip=True) -> None:
         super().__init__()
         self.mean = mean
