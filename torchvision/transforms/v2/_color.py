@@ -269,6 +269,9 @@ class RandomEqualize(_RandomApplyTransform):
 
     _v1_transform_cls = _transforms.RandomEqualize
 
+    if CVCUDA_AVAILABLE:
+        _transformed_types = _RandomApplyTransform._transformed_types + (_is_cvcuda_tensor,)
+
     def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
         return self._call_kernel(F.equalize, inpt)
 
