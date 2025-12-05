@@ -8,12 +8,9 @@ from torchvision.transforms.functional import InterpolationMode
 
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
-<<<<<<< HEAD
 
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
-=======
->>>>>>> feat/elastic_cvcuda
 
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
@@ -264,3 +261,22 @@ def _get_torch_dtype_from_cvcuda_type(dtype: "cvcuda.Type") -> torch.dtype:
     if torch_dtype is None:
         raise ValueError(f"No torch dtype found for CV-CUDA type {dtype}")
     return torch_dtype
+
+
+_pad_mode_to_cvcuda_border: dict[str, "cvcuda.Border"] = {}
+
+
+def _get_cvcuda_border_from_pad_mode(pad_mode: str) -> "cvcuda.Border":
+    if len(_pad_mode_to_cvcuda_border) == 0:
+        cvcuda = _import_cvcuda()
+        _pad_mode_to_cvcuda_border["constant"] = cvcuda.Border.CONSTANT
+        _pad_mode_to_cvcuda_border["reflect"] = cvcuda.Border.REFLECT101
+        _pad_mode_to_cvcuda_border["replicate"] = cvcuda.Border.REPLICATE
+        _pad_mode_to_cvcuda_border["edge"] = cvcuda.Border.REPLICATE
+        _pad_mode_to_cvcuda_border["symmetric"] = cvcuda.Border.REFLECT
+
+    border_mode = _pad_mode_to_cvcuda_border.get(pad_mode)
+    if border_mode is None:
+        raise ValueError(f"Pad mode {pad_mode} is not supported with CV-CUDA")
+
+    return border_mode
