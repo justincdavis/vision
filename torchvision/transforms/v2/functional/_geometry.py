@@ -2,7 +2,7 @@ import math
 import numbers
 import warnings
 from collections.abc import Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union, TYPE_CHECKING
 
 import numpy as np
 import PIL.Image

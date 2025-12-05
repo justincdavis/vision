@@ -21,6 +21,8 @@ from ._utils import (
     is_pure_tensor,
 )
 
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
 
 CVCUDA_AVAILABLE = _is_cvcuda_available()
 
@@ -195,6 +197,9 @@ class GaussianBlur(Transform):
     """
 
     _v1_transform_cls = _transforms.GaussianBlur
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(
         self, kernel_size: Union[int, Sequence[int]], sigma: Union[int, float, Sequence[float]] = (0.1, 2.0)
