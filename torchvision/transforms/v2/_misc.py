@@ -27,6 +27,9 @@ CVCUDA_AVAILABLE = _is_cvcuda_available()
 CVCUDA_AVAILABLE = _is_cvcuda_available()
 
 
+CVCUDA_AVAILABLE = _is_cvcuda_available()
+
+
 # TODO: do we want/need to expose this?
 class Identity(Transform):
     def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
@@ -165,6 +168,9 @@ class Normalize(Transform):
     """
 
     _v1_transform_cls = _transforms.Normalize
+
+    if CVCUDA_AVAILABLE:
+        _transformed_types = Transform._transformed_types + (_is_cvcuda_tensor,)
 
     def __init__(self, mean: Sequence[float], std: Sequence[float], inplace: bool = False):
         super().__init__()
