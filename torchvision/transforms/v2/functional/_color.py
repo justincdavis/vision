@@ -12,7 +12,7 @@ from torchvision.utils import _log_api_usage_once
 
 from ._misc import _num_value_bits, to_dtype_image
 from ._type_conversion import pil_to_tensor, to_pil_image
-from ._utils import _get_kernel, _register_kernel_internal
+from ._utils import _get_kernel, _get_stream_for_cvcuda, _register_kernel_internal
 
 
 CVCUDA_AVAILABLE = _is_cvcuda_available()
@@ -77,6 +77,7 @@ def _rgb_to_grayscale_image_cvcuda(
     num_output_channels: int = 1,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if num_output_channels not in (1, 3):
         raise ValueError(f"num_output_channels must be 1 or 3, got {num_output_channels}.")
@@ -87,7 +88,7 @@ def _rgb_to_grayscale_image_cvcuda(
     if image.shape[3] == 1:
         # if we already have a single channel, just clone the tensor
         # we will use copymakeborder since CV-CUDA has no native clone
-        return cvcuda.copymakeborder(
+        result = cvcuda.copymakeborder(
             image,
             border_mode=cvcuda.Border.CONSTANT,
             border_value=[0],
@@ -95,9 +96,14 @@ def _rgb_to_grayscale_image_cvcuda(
             left=0,
             bottom=0,
             right=0,
+            stream=stream,
         )
+        stream.sync()
+        return result
 
-    return cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY)
+    result = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -134,11 +140,12 @@ def _grayscale_to_rgb_image_cvcuda(
     image: "cvcuda.Tensor",
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if image.shape[3] == 3:
         # if we already have RGB channels, just clone the tensor
         # we will use copymakeborder since CV-CUDA has no native clone
-        return cvcuda.copymakeborder(
+        result = cvcuda.copymakeborder(
             image,
             border_mode=cvcuda.Border.CONSTANT,
             border_value=[0],
@@ -146,9 +153,14 @@ def _grayscale_to_rgb_image_cvcuda(
             left=0,
             bottom=0,
             right=0,
+            stream=stream,
         )
+        stream.sync()
+        return result
 
-    return cvcuda.cvtcolor(image, cvcuda.ColorConversion.GRAY2RGB)
+    result = cvcuda.cvtcolor(image, cvcuda.ColorConversion.GRAY2RGB, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -203,11 +215,14 @@ def adjust_brightness_video(video: torch.Tensor, brightness_factor: float) -> to
 
 def _adjust_brightness_image_cvcuda(image: "cvcuda.Tensor", brightness_factor: float) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     cv_brightness = torch.tensor([brightness_factor], dtype=torch.float32, device="cuda")
     cv_brightness = cvcuda.as_tensor(cv_brightness, "N")
 
-    return cvcuda.brightness_contrast(image, brightness=cv_brightness)
+    result = cvcuda.brightness_contrast(image, brightness=cv_brightness, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -255,6 +270,7 @@ def adjust_saturation_video(video: torch.Tensor, saturation_factor: float) -> to
 
 def _adjust_saturation_image_cvcuda(image: "cvcuda.Tensor", saturation_factor: float) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if saturation_factor < 0:
         raise ValueError(f"saturation_factor ({saturation_factor}) is not non-negative.")
@@ -279,7 +295,9 @@ def _adjust_saturation_image_cvcuda(image: "cvcuda.Tensor", saturation_factor: f
         "HW",
     )
 
-    return cvcuda.color_twist(image, twist_tensor)
+    result = cvcuda.color_twist(image, twist_tensor, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -327,6 +345,7 @@ def adjust_contrast_video(video: torch.Tensor, contrast_factor: float) -> torch.
 
 def _adjust_contrast_image_cvcuda(image: "cvcuda.Tensor", contrast_factor: float) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if contrast_factor < 0:
         raise ValueError(f"contrast_factor ({contrast_factor}) is not non-negative.")
@@ -336,7 +355,7 @@ def _adjust_contrast_image_cvcuda(image: "cvcuda.Tensor", contrast_factor: float
         raise TypeError(f"Input image tensor permitted channel values are 1 or 3, but found {c}")
 
     if c == 3:
-        grayscale = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY)
+        grayscale = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2GRAY, stream=stream)
     else:
         grayscale = image
 
@@ -348,7 +367,9 @@ def _adjust_contrast_image_cvcuda(image: "cvcuda.Tensor", contrast_factor: float
     mean = torch.mean(torch_image.float())
     contrast_center = cvcuda.as_tensor(torch.tensor([mean.item()], dtype=torch.float32, device="cuda"))
 
-    return cvcuda.brightness_contrast(image, contrast=contrast, contrast_center=contrast_center)
+    result = cvcuda.brightness_contrast(image, contrast=contrast, contrast_center=contrast_center, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -437,6 +458,7 @@ def _adjust_sharpness_image_cvcuda(
     sharpness_factor: float,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if len(_max_value_map) == 0:
         _max_value_map[cvcuda.Type.U8] = 255
@@ -483,12 +505,16 @@ def _adjust_sharpness_image_cvcuda(
     anchor = cvcuda.as_tensor(anchor_data, "NC")
 
     # run the sharpen operator using cvcuda.conv2d
-    sharpened_batch = cvcuda.conv2d(batch, kernel=kernel_batch, kernel_anchor=anchor, border=cvcuda.Border.REPLICATE)
+    sharpened_batch = cvcuda.conv2d(
+        batch, kernel=kernel_batch, kernel_anchor=anchor, border=cvcuda.Border.REPLICATE, stream=stream
+    )
+    stream.sync()
     sharpened_list = []
     for sharpened_img in sharpened_batch:
         tensor = cvcuda.as_tensor(sharpened_img.cuda(), cvcuda.TensorLayout.HWC)
         sharpened_list.append(tensor)
-    sharpened = cvcuda.stack(sharpened_list)
+    sharpened = cvcuda.stack(sharpened_list, stream=stream)
+    stream.sync()
 
     # handle the final blend operations using zero-copy from the adjust_sharpness_image
     blurred_degenerate = torch.as_tensor(sharpened.cuda())
@@ -630,6 +656,7 @@ def adjust_hue_video(video: torch.Tensor, hue_factor: float) -> torch.Tensor:
 
 def _adjust_hue_image_cvcuda(image: "cvcuda.Tensor", hue_factor: float) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if not (-0.5 <= hue_factor <= 0.5):
         raise ValueError(f"hue_factor ({hue_factor}) is not in [-0.5, 0.5].")
@@ -643,13 +670,16 @@ def _adjust_hue_image_cvcuda(image: "cvcuda.Tensor", hue_factor: float) -> "cvcu
 
     # no native adjust_hue, use CV-CUDA for color converison, use torch for elementwise operations
     # CV-CUDA accelerates the HSV conversion
-    hsv = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2HSV)
+    hsv = cvcuda.cvtcolor(image, cvcuda.ColorConversion.RGB2HSV, stream=stream)
+    stream.sync()
     # then use torch for elementwise operations
     hsv_torch = torch.as_tensor(hsv.cuda()).float()
     hsv_torch[..., 0] = (hsv_torch[..., 0] + hue_factor * 180) % 180
     # convert back to cvcuda tensor and accelerate the HSV2RGB conversion
     hsv_modified = cvcuda.as_tensor(hsv_torch.to(torch.uint8), "NHWC")
-    return cvcuda.cvtcolor(hsv_modified, cvcuda.ColorConversion.HSV2RGB)
+    result = cvcuda.cvtcolor(hsv_modified, cvcuda.ColorConversion.HSV2RGB, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -922,7 +952,10 @@ def _equalize_image_cvcuda(
     image: "cvcuda.Tensor",
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    return cvcuda.histogrameq(image, dtype=image.dtype)
+    stream = _get_stream_for_cvcuda()
+    result = cvcuda.histogrameq(image, dtype=image.dtype, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -965,6 +998,7 @@ _invert_cvcuda_tensors: dict[str, "cvcuda.Tensor"] = {}
 
 def _invert_image_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     # save the tensors into a dictionary only if CV-CUDA is actually used
     # we save these here, since they are static and small in size
@@ -990,7 +1024,9 @@ def _invert_image_cvcuda(image: "cvcuda.Tensor") -> "cvcuda.Tensor":
 
     # Use normalize to invert: output = (input - base) * scale * global_scale + shift
     # For inversion: output = (input - 0) * (-1) * 1 + shift = shift - input
-    return cvcuda.normalize(image, base=base, scale=scale, globalscale=1.0, globalshift=shift)
+    result = cvcuda.normalize(image, base=base, scale=scale, globalscale=1.0, globalshift=shift, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:

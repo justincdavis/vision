@@ -16,6 +16,7 @@ from ._meta import _convert_bounding_box_format
 from ._utils import (
     _get_cvcuda_type_from_torch_dtype,
     _get_kernel,
+    _get_stream_for_cvcuda,
     _get_torch_dtype_from_cvcuda_type,
     _import_cvcuda,
     _is_cvcuda_available,
@@ -94,6 +95,8 @@ def _normalize_image_cvcuda(
     inplace: bool = False,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
+
     if inplace:
         raise ValueError("Inplace normalization is not supported for CVCUDA.")
 
@@ -118,7 +121,11 @@ def _normalize_image_cvcuda(
     mean_cv = cvcuda.as_tensor(mt, cvcuda.TensorLayout.NHWC)
     std_cv = cvcuda.as_tensor(st, cvcuda.TensorLayout.NHWC)
 
-    return cvcuda.normalize(image, base=mean_cv, scale=std_cv, flags=cvcuda.NormalizeFlags.SCALE_IS_STDDEV)
+    result = cvcuda.normalize(
+        image, base=mean_cv, scale=std_cv, flags=cvcuda.NormalizeFlags.SCALE_IS_STDDEV, stream=stream
+    )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -247,15 +254,19 @@ def _gaussian_blur_image_cvcuda(
     image: "cvcuda.Tensor", kernel_size: list[int], sigma: Optional[list[float]] = None
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     kernel_size, sigma = _validate_kernel_size_and_sigma(kernel_size, sigma)
 
-    return cvcuda.gaussian(
+    result = cvcuda.gaussian(
         image,
         tuple(kernel_size),
         tuple(sigma),
         border=cvcuda.Border.REFLECT101,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -319,6 +330,7 @@ def _gaussian_noise_image_cvcuda(
     clip: bool = True,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     batch_size = image.shape[0]
     mu_tensor = cvcuda.as_tensor(torch.full((batch_size,), mean, dtype=torch.float32).cuda(), "N")
@@ -328,13 +340,16 @@ def _gaussian_noise_image_cvcuda(
     # produce a seed with torch RNG, if seed is manually set then this will be deterministic
     # note: clip is not supported in CV-CUDA, so we don't need to clamp the values
     # by default, clamping is done for floats, and uint8 overflows so is clamped from 0-255 anyways
-    return cvcuda.gaussiannoise(
+    result = cvcuda.gaussiannoise(
         image,
         mu=mu_tensor,
         sigma=sigma_tensor,
         per_channel=True,
         seed=int(torch.empty((), dtype=torch.int64).random_().item()),
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -479,6 +494,7 @@ def _to_dtype_image_cvcuda(
 
     """
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     dtype_in = _get_torch_dtype_from_cvcuda_type(inpt.dtype)
     cvc_dtype = _get_cvcuda_type_from_torch_dtype(dtype)
@@ -500,12 +516,15 @@ def _to_dtype_image_cvcuda(
         else:
             scale_val, offset = 1.0 / float(_max_value(dtype_in)), 0.0
 
-    return cvcuda.convertto(
+    result = cvcuda.convertto(
         inpt,
         dtype=cvc_dtype,
         scale=scale_val,
         offset=offset,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:

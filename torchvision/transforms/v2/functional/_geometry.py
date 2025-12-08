@@ -424,6 +424,7 @@ def _resize_image_cvcuda(
     antialias: Optional[bool] = True,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if len(_dtype_to_format_cvcuda) == 0:
         _dtype_to_format_cvcuda[cvcuda.Type.U8] = cvcuda.Format.U8
@@ -454,12 +455,15 @@ def _resize_image_cvcuda(
     # antialias is only supported for cvcuda.hq_resize, if set to true (which is also default)
     # we will fast-track to use hq_resize (also matchs the size parameter)
     if antialias:
-        return cvcuda.hq_resize(
+        result = cvcuda.hq_resize(
             image,
             out_size=(new_height, new_width),
             interpolation=interp,
             antialias=antialias,
+            stream=stream,
         )
+        stream.sync()
+        return result
 
     # if not using antialias, we will use cvcuda.resize/pillowresize instead
     # resize requires that the shape has the same dimensions as the input
@@ -470,19 +474,25 @@ def _resize_image_cvcuda(
     # bicubic mode is not accurate when using cvcuda.resize
     # cvcuda.pillowresize resolves some of the errors
     if interp == cvcuda.Interp.CUBIC:
-        return cvcuda.pillowresize(
+        result = cvcuda.pillowresize(
             image,
             shape=new_shape,
             format=_dtype_to_format_cvcuda[image.dtype],
             interp=interp,
+            stream=stream,
         )
+        stream.sync()
+        return result
 
     # otherwise we will use cvcuda.resize
-    return cvcuda.resize(
+    result = cvcuda.resize(
         image,
         shape=new_shape,
         interp=interp,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -1430,6 +1440,7 @@ def _affine_image_cvcuda(
     center: Optional[list[float]] = None,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     interpolation = _check_interpolation(interpolation)
     angle, translate, shear, center = _affine_parse_args(angle, translate, scale, shear, interpolation, center)
@@ -1459,13 +1470,16 @@ def _affine_image_cvcuda(
     else:
         border_value = np.array(fill, dtype=np.float32)[:num_channels]
 
-    return cvcuda.warp_affine(
+    result = cvcuda.warp_affine(
         image,
         xform,
         flags=interp | cvcuda.Interp.WARP_INVERSE_MAP,
         border_mode=cvcuda.Border.CONSTANT,
         border_value=border_value,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -1685,6 +1699,7 @@ def _rotate_image_cvcuda(
     fill: _FillTypeJIT = None,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     angle = angle % 360
 
@@ -1692,7 +1707,9 @@ def _rotate_image_cvcuda(
         return inpt
 
     if angle == 180:
-        return cvcuda.flip(inpt, flipCode=-1)
+        result = cvcuda.flip(inpt, flipCode=-1, stream=stream)
+        stream.sync()
+        return result
 
     interp = _get_cvcuda_interp(interpolation)
 
@@ -1726,7 +1743,9 @@ def _rotate_image_cvcuda(
         shift_x = (1 - cos_angle) * cx - sin_angle * cy
         shift_y = sin_angle * cx + (1 - cos_angle) * cy
 
-        return cvcuda.rotate(inpt, angle_deg=angle, shift=(shift_x, shift_y), interpolation=interp)
+        result = cvcuda.rotate(inpt, angle_deg=angle, shift=(shift_x, shift_y), interpolation=interp, stream=stream)
+        stream.sync()
+        return result
 
     # if we need to expand, use much of the same logic as torchvision, for output size/pad
     # Use center_f (image-center-relative coords) to match torchvision's output size calculation
@@ -1746,6 +1765,7 @@ def _rotate_image_cvcuda(
         right=pad_right,
         border_mode=cvcuda.Border.CONSTANT,
         border_value=fill_value,
+        stream=stream,
     )
 
     new_cx = pad_left + cx
@@ -1753,7 +1773,9 @@ def _rotate_image_cvcuda(
     shift_x = (1 - cos_angle) * new_cx - sin_angle * new_cy
     shift_y = sin_angle * new_cx + (1 - cos_angle) * new_cy
 
-    return cvcuda.rotate(padded, angle_deg=angle, shift=(shift_x, shift_y), interpolation=interp)
+    result = cvcuda.rotate(padded, angle_deg=angle, shift=(shift_x, shift_y), interpolation=interp, stream=stream)
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -1914,6 +1936,7 @@ def _pad_image_cvcuda(
     padding_mode: str = "constant",
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     border_mode = _get_cvcuda_border_from_pad_mode(padding_mode)
 
@@ -1924,7 +1947,7 @@ def _pad_image_cvcuda(
 
     left, right, top, bottom = _parse_pad_padding(padding)
 
-    return cvcuda.copymakeborder(
+    result = cvcuda.copymakeborder(
         image,
         border_mode=border_mode,
         border_value=fill,
@@ -1932,7 +1955,10 @@ def _pad_image_cvcuda(
         left=left,
         bottom=bottom,
         right=right,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -2189,6 +2215,7 @@ def _crop_image_cvcuda(
     width: int,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     image_height, image_width, channels = image.shape[1:]
     top_diff = 0
@@ -2212,13 +2239,17 @@ def _crop_image_cvcuda(
             left=left_diff,
             bottom=height_diff,
             right=width_diff,
+            stream=stream,
         )
         top = top + top_diff
         left = left + left_diff
-    return cvcuda.customcrop(
+    result = cvcuda.customcrop(
         image,
         cvcuda.RectI(x=left, y=top, width=width, height=height),
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -2595,6 +2626,7 @@ def _perspective_image_cvcuda(
     coefficients: Optional[list[float]] = None,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     c = _perspective_coefficients(startpoints, endpoints, coefficients)
     interpolation = _check_interpolation(interpolation)
@@ -2611,13 +2643,16 @@ def _perspective_image_cvcuda(
     else:
         border_value = np.array(fill, dtype=np.float32)[:num_channels]
 
-    return cvcuda.warp_perspective(
+    result = cvcuda.warp_perspective(
         image,
         xform,
         flags=interp | cvcuda.Interp.WARP_INVERSE_MAP,
         border_mode=cvcuda.Border.CONSTANT,
         border_value=border_value,
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -2875,6 +2910,7 @@ def _elastic_image_cvcuda(
     fill: _FillTypeJIT = None,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     if not isinstance(displacement, torch.Tensor):
         raise TypeError("Argument displacement should be a Tensor")
@@ -2926,7 +2962,7 @@ def _elastic_image_cvcuda(
     else:
         border_value = np.array([], dtype=np.float32)
 
-    output = cvcuda.remap(
+    result = cvcuda.remap(
         image,
         cv_map,
         src_interp=interp,
@@ -2935,9 +2971,10 @@ def _elastic_image_cvcuda(
         align_corners=False,
         border=border_mode,
         border_value=border_value,
+        stream=stream,
     )
-
-    return output
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
@@ -3094,6 +3131,7 @@ def _center_crop_image_cvcuda(
     output_size: list[int],
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
+    stream = _get_stream_for_cvcuda()
 
     crop_height, crop_width = _center_crop_parse_output_size(output_size)
     # we only allow cvcuda conversion for 4 ndim, and always use nhwc layout
@@ -3110,20 +3148,25 @@ def _center_crop_image_cvcuda(
             left=padding_ltrb[0],
             bottom=padding_ltrb[3],
             right=padding_ltrb[2],
+            stream=stream,
         )
 
         image_height = image.shape[1]
         image_width = image.shape[2]
 
         if crop_width == image_width and crop_height == image_height:
+            stream.sync()
             return image
 
     # use customcrop to match crop_image behavior
     crop_top, crop_left = _center_crop_compute_crop_anchor(crop_height, crop_width, image_height, image_width)
-    return cvcuda.customcrop(
+    result = cvcuda.customcrop(
         image,
         cvcuda.RectI(x=crop_left, y=crop_top, width=crop_width, height=crop_height),
+        stream=stream,
     )
+    stream.sync()
+    return result
 
 
 if CVCUDA_AVAILABLE:
