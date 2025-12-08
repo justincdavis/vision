@@ -357,7 +357,7 @@ def _to_dtype_tensor_dispatch(inpt: torch.Tensor, dtype: torch.dtype, scale: boo
 
 def _to_dtype_image_cvcuda(
     inpt: "cvcuda.Tensor",
-    dtype: torch.dtype,
+    dtype: torch.dtype = torch.float,
     scale: bool = False,
 ) -> "cvcuda.Tensor":
     """

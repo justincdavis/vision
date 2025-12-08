@@ -2628,6 +2628,23 @@ class TestToDtype:
         )
 
     @pytest.mark.parametrize(
+        ("kernel", "input_type"),
+        [
+            (F.to_dtype_image, torch.Tensor),
+            (F.to_dtype_video, tv_tensors.Video),
+            pytest.param(
+                F._misc._to_dtype_image_cvcuda,
+                None,
+                marks=pytest.mark.skipif(not CVCUDA_AVAILABLE, reason="test requires CVCUDA"),
+            ),
+        ],
+    )
+    def test_functional_signature(self, kernel, input_type):
+        if kernel is F._misc._to_dtype_image_cvcuda:
+            input_type = _import_cvcuda().Tensor
+        check_functional_kernel_signature_match(F.to_dtype, kernel=kernel, input_type=input_type)
+
+    @pytest.mark.parametrize(
         "make_input",
         [
             make_image_tensor,
@@ -2752,7 +2769,7 @@ class TestToDtype:
         inpt = make_input(dtype=input_dtype, device=device)
         out = fn(inpt, dtype=output_dtype, scale=scale)
 
-        if make_input == make_image_cvcuda:
+        if make_input is make_image_cvcuda:
             inpt = F.cvcuda_to_tensor(inpt)
             out = F.cvcuda_to_tensor(out)
 
