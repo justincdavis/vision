@@ -2758,8 +2758,14 @@ class TestToDtype:
 
         expected = self.reference_convert_dtype_image_tensor(inpt, dtype=output_dtype, scale=scale)
 
-        atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
-        torch.testing.assert_close(out, expected, rtol=0, atol=atol)
+        if make_input is make_image_cvcuda:
+            atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
+            assert_close(out, expected, rtol=0, atol=atol)
+        else:
+            if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
+                torch.testing.assert_close(out, expected, atol=1, rtol=0)
+            else:
+                torch.testing.assert_close(out, expected)
 
     def was_scaled(self, inpt):
         # this assumes the target dtype is float
