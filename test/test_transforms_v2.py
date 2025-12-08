@@ -2707,7 +2707,7 @@ class TestToDtype:
 
         return torch.tensor(tree_map(fn, image.tolist())).to(dtype=output_dtype, device=image.device)
 
-    def _get_dtype_conversion_atol(self, input_dtype, output_dtype, scale):
+    def _get_dtype_conversion_atol_cvcuda(self, input_dtype, output_dtype, scale):
         is_uint16_to_uint8 = input_dtype == torch.uint16 and output_dtype == torch.uint8
         is_uint8_to_uint16 = input_dtype == torch.uint8 and output_dtype == torch.uint16
         changes_type_class = output_dtype.is_floating_point != input_dtype.is_floating_point
@@ -2758,14 +2758,14 @@ class TestToDtype:
 
         expected = self.reference_convert_dtype_image_tensor(inpt, dtype=output_dtype, scale=scale)
 
+        atol, rtol = None, None
         if make_input is make_image_cvcuda:
-            atol = self._get_dtype_conversion_atol(input_dtype, output_dtype, scale)
-            assert_close(out, expected, rtol=0, atol=atol)
-        else:
-            if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
-                torch.testing.assert_close(out, expected, atol=1, rtol=0)
-            else:
-                torch.testing.assert_close(out, expected)
+            atol = self._get_dtype_conversion_atol_cvcuda(input_dtype, output_dtype, scale)
+            rtol = 0
+        elif input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
+            atol, rtol = 1, 0
+
+        torch.testing.assert_close(out, expected, atol=atol, rtol=rtol)
 
     def was_scaled(self, inpt):
         # this assumes the target dtype is float
