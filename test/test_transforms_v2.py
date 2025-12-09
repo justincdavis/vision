@@ -60,16 +60,10 @@ from torchvision.transforms.v2.functional._utils import (
 )
 
 
-CV_CUDA_TEST = (
+CV_CUDA_TEST = [
     pytest.mark.skipif(not _is_cvcuda_available(), reason="CVCUDA is not available"),
     pytest.mark.needs_cuda,
-)
-
-
-def CV_CUDA_TEST_CLASS(cls):
-    for mark in CV_CUDA_TEST:
-        cls = mark(cls)
-    return cls
+]
 
 
 # turns all warnings into errors for this module
@@ -6840,8 +6834,9 @@ class TestPILToTensor:
             F.pil_to_tensor(object())
 
 
-@CV_CUDA_TEST_CLASS
 class TestToCVCUDATensor:
+    pytestmark = CV_CUDA_TEST
+
     @pytest.mark.parametrize("image_type", (torch.Tensor, tv_tensors.Image))
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.uint16, torch.float32, torch.float64])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -6901,8 +6896,9 @@ class TestToCVCUDATensor:
         assert result_tensor.shape[0] == batch_size
 
 
-@CV_CUDA_TEST_CLASS
 class TestCVCUDAToTensor:
+    pytestmark = CV_CUDA_TEST
+
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.uint16, torch.float32, torch.float64])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("color_space", ["RGB", "GRAY"])
