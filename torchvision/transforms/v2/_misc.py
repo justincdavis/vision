@@ -316,7 +316,7 @@ class ToDtype(Transform):
             if (
                 not is_pure_tensor(inpt)
                 and not isinstance(inpt, (tv_tensors.Image, tv_tensors.Video))
-                and not (CVCUDA_AVAILABLE and not _is_cvcuda_tensor(inpt))
+                and not (CVCUDA_AVAILABLE and _is_cvcuda_tensor(inpt))
             ):
                 return inpt
 
