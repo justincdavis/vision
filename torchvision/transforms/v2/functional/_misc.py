@@ -14,9 +14,9 @@ from torchvision.utils import _log_api_usage_once
 from ._meta import _convert_bounding_box_format
 
 from ._utils import (
+    _cvcuda_sync_wrapper,
     _get_cvcuda_type_from_torch_dtype,
     _get_kernel,
-    _get_stream_for_cvcuda,
     _get_torch_dtype_from_cvcuda_type,
     _import_cvcuda,
     _is_cvcuda_available,
@@ -95,7 +95,6 @@ def _normalize_image_cvcuda(
     inplace: bool = False,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    stream = _get_stream_for_cvcuda()
 
     if inplace:
         raise ValueError("Inplace normalization is not supported for CVCUDA.")
@@ -121,15 +120,12 @@ def _normalize_image_cvcuda(
     mean_cv = cvcuda.as_tensor(mt, cvcuda.TensorLayout.NHWC)
     std_cv = cvcuda.as_tensor(st, cvcuda.TensorLayout.NHWC)
 
-    result = cvcuda.normalize(
-        image, base=mean_cv, scale=std_cv, flags=cvcuda.NormalizeFlags.SCALE_IS_STDDEV, stream=stream
-    )
-    stream.sync()
+    result = cvcuda.normalize(image, base=mean_cv, scale=std_cv, flags=cvcuda.NormalizeFlags.SCALE_IS_STDDEV)
     return result
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(normalize, _import_cvcuda().Tensor)(_normalize_image_cvcuda)
+    _register_kernel_internal(normalize, _import_cvcuda().Tensor)(_cvcuda_sync_wrapper(_normalize_image_cvcuda))
 
 
 def gaussian_blur(inpt: torch.Tensor, kernel_size: list[int], sigma: Optional[list[float]] = None) -> torch.Tensor:
@@ -254,7 +250,6 @@ def _gaussian_blur_image_cvcuda(
     image: "cvcuda.Tensor", kernel_size: list[int], sigma: Optional[list[float]] = None
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    stream = _get_stream_for_cvcuda()
 
     kernel_size, sigma = _validate_kernel_size_and_sigma(kernel_size, sigma)
 
@@ -263,14 +258,12 @@ def _gaussian_blur_image_cvcuda(
         tuple(kernel_size),
         tuple(sigma),
         border=cvcuda.Border.REFLECT101,
-        stream=stream,
     )
-    stream.sync()
     return result
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(gaussian_blur, _import_cvcuda().Tensor)(_gaussian_blur_image_cvcuda)
+    _register_kernel_internal(gaussian_blur, _import_cvcuda().Tensor)(_cvcuda_sync_wrapper(_gaussian_blur_image_cvcuda))
 
 
 def gaussian_noise(inpt: torch.Tensor, mean: float = 0.0, sigma: float = 0.1, clip: bool = True) -> torch.Tensor:
@@ -330,7 +323,6 @@ def _gaussian_noise_image_cvcuda(
     clip: bool = True,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    stream = _get_stream_for_cvcuda()
 
     batch_size = image.shape[0]
     mu_tensor = cvcuda.as_tensor(torch.full((batch_size,), mean, dtype=torch.float32).cuda(), "N")
@@ -346,14 +338,14 @@ def _gaussian_noise_image_cvcuda(
         sigma=sigma_tensor,
         per_channel=True,
         seed=int(torch.empty((), dtype=torch.int64).random_().item()),
-        stream=stream,
     )
-    stream.sync()
     return result
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(gaussian_noise, _import_cvcuda().Tensor)(_gaussian_noise_image_cvcuda)
+    _register_kernel_internal(gaussian_noise, _import_cvcuda().Tensor)(
+        _cvcuda_sync_wrapper(_gaussian_noise_image_cvcuda)
+    )
 
 
 def to_dtype(inpt: torch.Tensor, dtype: torch.dtype = torch.float, scale: bool = False) -> torch.Tensor:
@@ -494,7 +486,6 @@ def _to_dtype_image_cvcuda(
 
     """
     cvcuda = _import_cvcuda()
-    stream = _get_stream_for_cvcuda()
 
     dtype_in = _get_torch_dtype_from_cvcuda_type(inpt.dtype)
     cvc_dtype = _get_cvcuda_type_from_torch_dtype(dtype)
@@ -521,14 +512,12 @@ def _to_dtype_image_cvcuda(
         dtype=cvc_dtype,
         scale=scale_val,
         offset=offset,
-        stream=stream,
     )
-    stream.sync()
     return result
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(to_dtype, _import_cvcuda().Tensor)(_to_dtype_image_cvcuda)
+    _register_kernel_internal(to_dtype, _import_cvcuda().Tensor)(_cvcuda_sync_wrapper(_to_dtype_image_cvcuda))
 
 
 def sanitize_bounding_boxes(

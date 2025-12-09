@@ -1,6 +1,6 @@
 import functools
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, ParamSpec, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torchvision import tv_tensors
@@ -8,6 +8,9 @@ from torchvision.transforms.functional import InterpolationMode
 
 if TYPE_CHECKING:
     import cvcuda  # type: ignore[import-not-found]
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 _FillType = Union[int, float, Sequence[int], Sequence[float], None]
 _FillTypeJIT = Optional[list[float]]
@@ -279,7 +282,16 @@ def _get_cvcuda_border_from_pad_mode(pad_mode: str) -> "cvcuda.Border":
     return border_mode
 
 
-def _get_stream_for_cvcuda() -> "cvcuda.Stream":
+def _cvcuda_sync_wrapper(fn: Callable[P, R]) -> Callable[P, R]:
     cvcuda = _import_cvcuda()
 
-    return cvcuda.as_stream(torch.cuda.current_stream())
+    @functools.wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        stream = torch.cuda.current_stream()
+
+        with cvcuda.as_stream(stream):
+            result = fn(*args, **kwargs)
+
+        return result
+
+    return wrapper

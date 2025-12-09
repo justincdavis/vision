@@ -11,7 +11,7 @@ from torchvision.transforms.functional import pil_to_tensor, to_pil_image
 from torchvision.transforms.v2.functional._utils import _import_cvcuda, _is_cvcuda_available
 from torchvision.utils import _log_api_usage_once
 
-from ._utils import _get_kernel, _get_stream_for_cvcuda, _register_kernel_internal
+from ._utils import _cvcuda_sync_wrapper, _get_kernel, _register_kernel_internal
 
 
 CVCUDA_AVAILABLE = _is_cvcuda_available()
@@ -77,7 +77,6 @@ def _erase_image_cvcuda(
     inplace: bool = False,
 ) -> "cvcuda.Tensor":
     cvcuda = _import_cvcuda()
-    stream = _get_stream_for_cvcuda()
 
     if inplace:
         raise ValueError("inplace is not supported for cvcuda.Tensor")
@@ -152,14 +151,12 @@ def _erase_image_cvcuda(
         imgIdx=cv_imgIdx,
         random=is_random_fill,
         seed=seed,
-        stream=stream,
     )
-    stream.sync()
     return result
 
 
 if CVCUDA_AVAILABLE:
-    _register_kernel_internal(erase, _import_cvcuda().Tensor)(_erase_image_cvcuda)
+    _register_kernel_internal(erase, _import_cvcuda().Tensor)(_cvcuda_sync_wrapper(_erase_image_cvcuda))
 
 
 def jpeg(image: torch.Tensor, quality: int) -> torch.Tensor:
