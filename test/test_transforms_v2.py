@@ -2690,23 +2690,22 @@ class TestToDtype:
 
         return torch.tensor(tree_map(fn, image.tolist())).to(dtype=output_dtype, device=image.device)
 
-    def _get_dtype_conversion_atol_cvcuda(self, input_dtype, output_dtype, scale):
-        is_uint16_to_uint8 = input_dtype == torch.uint16 and output_dtype == torch.uint8
-        is_uint8_to_uint16 = input_dtype == torch.uint8 and output_dtype == torch.uint16
-        changes_type_class = output_dtype.is_floating_point != input_dtype.is_floating_point
-
+    def _get_dtype_conversion_atol_cvcuda(self, input_dtype, output_dtype):
         in_bits = torch.iinfo(input_dtype).bits if not input_dtype.is_floating_point else None
         out_bits = torch.iinfo(output_dtype).bits if not output_dtype.is_floating_point else None
-        expands_bits = in_bits is not None and out_bits is not None and out_bits > in_bits
+        narrows_bits = in_bits is not None and out_bits is not None and out_bits < in_bits
 
-        if is_uint16_to_uint8:
-            atol = 255
-        elif is_uint8_to_uint16 and not scale:
-            atol = 255
-        elif expands_bits and not scale:
+        # int->int with narrowing bits, allow atol=1 for rounding diffs
+        if narrows_bits:
             atol = 1
-        elif changes_type_class:
+        # float->int check for same diff, rounding error on float
+        elif input_dtype.is_floating_point and not output_dtype.is_floating_point:
             atol = 1
+        # if generating a float value from an int, allow small rounding error
+        elif not input_dtype.is_floating_point and output_dtype.is_floating_point:
+            atol = 1e-7
+        # all other cases, should be exact
+        # uint8 -> uint16 promotion would be here
         else:
             atol = 0
 
@@ -2729,6 +2728,13 @@ class TestToDtype:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
             pytest.xfail("uint8 to uint16 conversion is not supported on cuda")
+        if (
+            input_dtype == torch.uint16
+            and output_dtype == torch.uint8
+            and not scale
+            and make_input is make_image_cvcuda
+        ):
+            pytest.xfail("uint16 to uint8 conversion without scale is not supported for CV-CUDA.")
 
         input = make_input(dtype=input_dtype, device=device)
         out = fn(input, dtype=output_dtype, scale=scale)
@@ -2741,7 +2747,7 @@ class TestToDtype:
 
         atol, rtol = None, None
         if make_input is make_image_cvcuda:
-            atol = self._get_dtype_conversion_atol_cvcuda(input_dtype, output_dtype, scale)
+            atol = self._get_dtype_conversion_atol_cvcuda(input_dtype, output_dtype)
             rtol = 0
         elif input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
             atol, rtol = 1, 0

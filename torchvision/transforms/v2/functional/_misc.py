@@ -401,6 +401,13 @@ def _to_dtype_image_cvcuda(
     if dtype_in is None or cvc_dtype is None:
         raise ValueError(f"No torch or cvcuda dtype found for dtype {dtype} or {inpt.dtype}")
 
+    # torchvision will overflow the values of uint16 when converting down to uint8 without scale
+    # example: 300 -> 255 (cvcuda) vs 300 mod 256 = 44 (torchvision)
+    # since it is not equivalent, raise an error for unsupported behavior
+    # the workaround could be using torch for dtype conversion directly via zero-copy
+    if dtype_in == torch.uint16 and dtype == torch.uint8 and not scale:
+        raise ValueError("uint16 to uint8 conversion without scale is not supported for CV-CUDA.")
+
     scale_val, offset = 1.0, 0.0
     if scale:
         in_dtype_float = dtype_in.is_floating_point
@@ -414,7 +421,10 @@ def _to_dtype_image_cvcuda(
             scale_val = float(2 ** (out_bits - in_bits))
             offset = 0.0
         elif in_dtype_float and not out_dtype_float:
-            scale_val, offset = float(_max_value(dtype)), 0.0
+            # Mirror the scaling factor which torchvision uses
+            eps = 1e-3
+            max_val = float(_max_value(dtype))
+            scale_val, offset = max_val + 1.0 - eps, 0.0
         else:
             scale_val, offset = 1.0 / float(_max_value(dtype_in)), 0.0
 
