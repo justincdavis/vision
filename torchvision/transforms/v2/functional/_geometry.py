@@ -1571,6 +1571,10 @@ def pad(
     return kernel(inpt, padding=padding, fill=fill, padding_mode=padding_mode)
 
 
+if _is_cvcuda_available():
+    _register_cvcuda_kernel(pad, tv.pad)
+
+
 def _parse_pad_padding(padding: Union[int, list[int]]) -> list[int]:
     if isinstance(padding, int):
         pad_left = pad_right = pad_top = pad_bottom = padding
