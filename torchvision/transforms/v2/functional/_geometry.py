@@ -1369,6 +1369,10 @@ def rotate(
     return kernel(inpt, angle=angle, interpolation=interpolation, expand=expand, fill=fill, center=center)
 
 
+if _is_cvcuda_available():
+    _register_cvcuda_kernel(rotate, tv.rotate)
+
+
 @_register_kernel_internal(rotate, torch.Tensor)
 @_register_kernel_internal(rotate, tv_tensors.Image)
 def rotate_image(
