@@ -3048,3 +3048,11 @@ def ten_crop_video(
     torch.Tensor,
 ]:
     return ten_crop_image(video, size, vertical_flip=vertical_flip)
+
+
+if _is_cvcuda_available():
+    _register_cvcuda_kernel(crop, tv.crop)
+    _register_cvcuda_kernel(center_crop, tv.center_crop)
+    _register_cvcuda_kernel(resized_crop, tv.resized_crop)
+    _register_cvcuda_kernel(five_crop, tv.five_crop)
+    _register_cvcuda_kernel(ten_crop, tv.ten_crop)
