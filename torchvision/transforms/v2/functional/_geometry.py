@@ -1974,6 +1974,10 @@ def perspective(
     )
 
 
+if _is_cvcuda_available():
+    _register_cvcuda_kernel(perspective, tv.perspective)
+
+
 def _perspective_grid(coeffs: list[float], ow: int, oh: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
     # https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/
     # src/libImaging/Geometry.c#L394
