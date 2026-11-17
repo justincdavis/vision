@@ -272,6 +272,10 @@ def resize(
     return kernel(inpt, size=size, interpolation=interpolation, max_size=max_size, antialias=antialias)
 
 
+if _is_cvcuda_available():
+    _register_cvcuda_kernel(resize, tv.resize)
+
+
 # This is an internal helper method for resize_image. We should put it here instead of keeping it
 # inside resize_image due to torchscript.
 # uint8 dtype support for bilinear and bicubic is limited to cpu and
