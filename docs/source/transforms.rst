@@ -452,6 +452,8 @@ Conversion
     :toctree: generated/
     :template: class.rst
 
+    v2.ToCVCUDATensor
+    v2.CVCUDAToTensor
     v2.ToImage
     v2.ToPureTensor
     v2.PILToTensor
@@ -465,11 +467,42 @@ functionals
     :toctree: generated/
     :template: functional.rst
 
+    v2.functional.as_cvcuda_tensor
+    v2.functional.to_cvcuda_tensor
+    v2.functional.cvcuda_to_tensor
     v2.functional.to_image
     v2.functional.pil_to_tensor
     v2.functional.to_pil_image
     v2.functional.to_dtype
     v2.functional.convert_bounding_box_format
+
+CV-CUDA backend
+^^^^^^^^^^^^^^^
+
+CV-CUDA >= 0.19.0 is an optional dependency. Opt in explicitly by wrapping
+CHW or NCHW Torch images with :func:`v2.functional.as_cvcuda_tensor` (zero-copy,
+contiguous CUDA inputs only) or :class:`v2.ToCVCUDATensor` (also transfers CPU
+inputs and makes non-contiguous inputs contiguous). Values, dtype, shape and
+CUDA device are preserved; no channel permutation or value scaling is performed.
+CV-CUDA operations do not support autograd: detach inputs explicitly if needed.
+
+Only ``cvcuda.Tensor`` inputs dispatch to ``cvcuda.tv``. Ordinary Torch tensors
+continue to use native TorchVision kernels, even when CV-CUDA is installed.
+Horizontal and vertical flips are supported. Other operations require their
+own CV-CUDA kernel registration. Convert back with :class:`v2.CVCUDAToTensor`.
+Registered operations run on PyTorch's current stream for the input's device;
+if producing inputs on another stream, synchronize it before use.
+
+.. code-block:: python
+
+    from torchvision.transforms import v2
+
+    pipeline = v2.Compose([
+        v2.ToCVCUDATensor(),
+        v2.RandomHorizontalFlip(p=1),
+        v2.CVCUDAToTensor(),
+    ])
+    output = pipeline(image)  # CHW or NCHW Torch tensor; output stays on CUDA
 
 
 Deprecated
