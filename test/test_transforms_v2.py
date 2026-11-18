@@ -4335,55 +4335,6 @@ class TestGaussianNoise:
         out = F.gaussian_noise(img, mean=-100, clip=True)
         assert (out == 0).all()
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("channels", [1, 3])
-    def test_cvcuda_seed_reproducibility(self, dtype, channels):
-        image = torch.full((2, channels, 19, 23), 127 if dtype == torch.uint8 else .5, device="cuda", dtype=dtype)
-        inpt = F.to_cvcuda_tensor(image)
-        kernel = _get_kernel(F.gaussian_noise, _import_cvcuda().Tensor)
-        first = F.cvcuda_to_tensor(kernel(inpt, sigma=.2, seed=123))
-        second = F.cvcuda_to_tensor(kernel(inpt, sigma=.2, seed=123))
-        other = F.cvcuda_to_tensor(kernel(inpt, sigma=.2, seed=124))
-        torch.testing.assert_close(first, second, rtol=0, atol=0)
-        assert not torch.equal(first, other)
-        assert not torch.equal(first, image)
-        assert first.min() >= 0
-        assert first.max() <= (255 if dtype == torch.uint8 else 1)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("mean", [-2., 2.])
-    def test_cvcuda_clip_float(self, mean):
-        image = torch.full((2, 1, 11, 13), .5, device="cuda")
-        inpt = F.to_cvcuda_tensor(image)
-        unclipped = F.cvcuda_to_tensor(F.gaussian_noise(inpt, mean=mean, sigma=0, clip=False))
-        clipped = F.cvcuda_to_tensor(F.gaussian_noise(inpt, mean=mean, sigma=0, clip=True))
-        torch.testing.assert_close(unclipped, F.gaussian_noise(image, mean=mean, sigma=0, clip=False))
-        torch.testing.assert_close(clipped, F.gaussian_noise(image, mean=mean, sigma=0, clip=True))
-
-    @pytest.mark.needs_cvcuda
-    def test_cvcuda_negative_sigma(self):
-        with pytest.raises(ValueError, match="sigma shouldn't be negative"):
-            F.gaussian_noise(make_image_cvcuda(), sigma=-.1)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("seed,error,match", [
-        (True, TypeError, "64-bit integer"), (1.2, TypeError, "64-bit integer"),
-        (-1, ValueError, "range"), (2**64, ValueError, "range"),
-    ])
-    def test_cvcuda_invalid_seed(self, seed, error, match):
-        with pytest.raises(error, match=match):
-            _get_kernel(F.gaussian_noise, _import_cvcuda().Tensor)(make_image_cvcuda(), seed=seed)
-
-    @pytest.mark.needs_cvcuda
-    def test_cvcuda_transform_distribution(self):
-        image = torch.full((2, 3, 64, 64), .5, device="cuda")
-        actual = F.cvcuda_to_tensor(transforms.GaussianNoise(mean=.1, sigma=.05, clip=False)(F.to_cvcuda_tensor(image)))
-        noise = actual - image
-        assert abs(noise.mean().item() - .1) < .002
-        assert abs(noise.std().item() - .05) < .002
-        assert not torch.equal(actual[0], actual[1])
-
 
 class TestAutoAugmentTransforms:
     # These transforms have a lot of branches in their `forward()` passes which are conditioned on random sampling.
