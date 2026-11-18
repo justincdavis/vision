@@ -25,7 +25,7 @@ from torchvision.tv_tensors._bounding_boxes import CLAMPING_MODE_TYPE
 
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _is_cvcuda_available, _register_cvcuda_kernel, tv
+from ._cvcuda import _import_cvcuda, _is_cvcuda_available, _register_cvcuda_kernel
 from ._meta import _get_size_image_pil, clamp_bounding_boxes, convert_bounding_box_format
 
 from ._utils import _FillTypeJIT, _get_kernel, _register_five_ten_crop_kernel_internal, _register_kernel_internal
@@ -70,7 +70,7 @@ def horizontal_flip_image(image: torch.Tensor) -> torch.Tensor:
 
 
 if _is_cvcuda_available():
-    _register_cvcuda_kernel(horizontal_flip, tv.horizontal_flip)
+    _register_cvcuda_kernel(horizontal_flip, _import_cvcuda().tv.horizontal_flip)
 
 
 @_register_kernel_internal(horizontal_flip, PIL.Image.Image)
@@ -162,7 +162,7 @@ def vertical_flip_image(image: torch.Tensor) -> torch.Tensor:
 
 
 if _is_cvcuda_available():
-    _register_cvcuda_kernel(vertical_flip, tv.vertical_flip)
+    _register_cvcuda_kernel(vertical_flip, _import_cvcuda().tv.vertical_flip)
 
 
 @_register_kernel_internal(vertical_flip, PIL.Image.Image)
@@ -1975,7 +1975,7 @@ def perspective(
 
 
 if _is_cvcuda_available():
-    _register_cvcuda_kernel(perspective, tv.perspective)
+    _register_cvcuda_kernel(perspective, _import_cvcuda().tv.perspective)
 
 
 def _perspective_grid(coeffs: list[float], ow: int, oh: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
