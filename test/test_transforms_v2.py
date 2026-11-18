@@ -2986,6 +2986,7 @@ class TestAdjustBrightness:
 
         actual = F.adjust_brightness(image, brightness_factor=brightness_factor)
         if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
             image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_brightness(F.to_pil_image(image), brightness_factor=brightness_factor))
 
@@ -6344,6 +6345,7 @@ class TestAdjustContrast:
 
         actual = F.adjust_contrast(image, contrast_factor=contrast_factor)
         if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
             image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_contrast(F.to_pil_image(image), contrast_factor=contrast_factor))
 
@@ -6523,6 +6525,7 @@ class TestAdjustSaturation:
 
         actual = F.adjust_saturation(image, saturation_factor=saturation_factor)
         if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
             image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_saturation(F.to_pil_image(image), saturation_factor=saturation_factor))
 
