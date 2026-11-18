@@ -1555,6 +1555,7 @@ class TestAffine:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -1570,9 +1571,13 @@ class TestAffine:
             (F.affine_mask, tv_tensors.Mask),
             (F.affine_video, tv_tensors.Video),
             (F.affine_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.affine, input_type)
         check_functional_kernel_signature_match(F.affine, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -1585,6 +1590,7 @@ class TestAffine:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -1600,8 +1606,11 @@ class TestAffine:
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
-    def test_functional_image_correctness(self, angle, translate, scale, shear, center, interpolation, fill):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
+    def test_functional_image_correctness(self, angle, translate, scale, shear, center, interpolation, fill, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
@@ -1615,6 +1624,9 @@ class TestAffine:
             interpolation=interpolation,
             fill=fill,
         )
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(
             F.affine(
                 F.to_pil_image(image),
@@ -1629,14 +1641,20 @@ class TestAffine:
         )
 
         mae = (actual.float() - expected.float()).abs().mean()
-        assert mae < 2 if interpolation == "nearest" else 8
+        if make_input is make_image_cvcuda:
+            assert mae < (255 if interpolation == "nearest" else 1), f"MAE: {mae}"
+        else:
+            assert mae < 2 if interpolation == "nearest" else 8
 
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
     @pytest.mark.parametrize("seed", list(range(5)))
-    def test_transform_image_correctness(self, center, interpolation, fill, seed):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
+    def test_transform_image_correctness(self, center, interpolation, fill, seed, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
@@ -1648,10 +1666,27 @@ class TestAffine:
         actual = transform(image)
 
         torch.manual_seed(seed)
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(transform(F.to_pil_image(image)))
 
         mae = (actual.float() - expected.float()).abs().mean()
-        assert mae < 2 if interpolation == "nearest" else 8
+        if make_input is make_image_cvcuda:
+            assert mae < (255 if interpolation == "nearest" else 1), f"MAE: {mae}"
+        else:
+            assert mae < 2 if interpolation == "nearest" else 8
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_nontrivial_nearest(self, dtype):
+        torch.manual_seed(28)
+        image = torch.rand(2, 3, 23, 29, device="cuda")
+        if dtype == torch.uint8:
+            image = (image * 255).to(dtype)
+        kwargs = dict(angle=17, translate=[2, -1], scale=0.85, shear=[7, 3], fill=7 if dtype == torch.uint8 else 0.2)
+        actual = F.cvcuda_to_tensor(F.affine(F.to_cvcuda_tensor(image), **kwargs))
+        torch.testing.assert_close(actual, F.affine(image, **kwargs), atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
 
     def _compute_affine_matrix(self, *, angle, translate, scale, shear, center):
         rot = math.radians(angle)
