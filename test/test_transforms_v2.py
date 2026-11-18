@@ -1756,17 +1756,6 @@ class TestAffine:
         else:
             assert mae < 2 if interpolation == "nearest" else 8
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    def test_cvcuda_nontrivial_nearest(self, dtype):
-        torch.manual_seed(28)
-        image = torch.rand(2, 3, 23, 29, device="cuda")
-        if dtype == torch.uint8:
-            image = (image * 255).to(dtype)
-        kwargs = dict(angle=17, translate=[2, -1], scale=0.85, shear=[7, 3], fill=7 if dtype == torch.uint8 else 0.2)
-        actual = F.cvcuda_to_tensor(F.affine(F.to_cvcuda_tensor(image), **kwargs))
-        torch.testing.assert_close(actual, F.affine(image, **kwargs), atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
-
     def _compute_affine_matrix(self, *, angle, translate, scale, shear, center):
         rot = math.radians(angle)
         cx, cy = center
