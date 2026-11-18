@@ -5892,7 +5892,11 @@ class TestInvert:
     def test_kernel_video(self):
         check_kernel(F.invert_video, make_video())
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.invert, make_input())
 
@@ -5903,23 +5907,50 @@ class TestInvert:
             (F._color._invert_image_pil, PIL.Image.Image),
             (F.invert_image, tv_tensors.Image),
             (F.invert_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.invert, input_type)
         check_functional_kernel_signature_match(F.invert, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomInvert(p=1), make_input())
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("fn", [F.invert, transform_cls_to_functional(transforms.RandomInvert, p=1)])
-    def test_correctness_image(self, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, fn):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = fn(image)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.invert(F.to_pil_image(image)))
 
         assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("batch_dims", [(), (2,)])
+    def test_invert_gray(self, dtype, batch_dims):
+        image = torch.arange(2 * 11 * 13, device="cuda").reshape(2, 1, 11, 13).remainder(255).to(dtype)
+        if not batch_dims:
+            image = image[0]
+        if dtype == torch.float32:
+            image.div_(255)
+        result = F.invert(F.to_cvcuda_tensor(image))
+        assert_close(F.cvcuda_to_tensor(result), F.invert(image), rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
+        assert_close(F.cvcuda_to_tensor(F.invert(result)), image, rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
 
 
 class TestPosterize:
