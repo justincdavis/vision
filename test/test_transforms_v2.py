@@ -3372,6 +3372,7 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -3387,9 +3388,13 @@ class TestElastic:
             (F.elastic_mask, tv_tensors.Mask),
             (F.elastic_video, tv_tensors.Video),
             (F.elastic_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.elastic, input_type)
         check_functional_kernel_signature_match(F.elastic, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -3402,6 +3407,7 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_displacement_error(self, make_input):
@@ -3423,6 +3429,7 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     # ElasticTransform needs larger images to avoid the needed internal padding being larger than the actual image
@@ -3439,6 +3446,45 @@ class TestElastic:
             make_input(size, device=device),
             check_v1_compatibility=check_v1_compatibility,
         )
+
+    @pytest.mark.needs_cvcuda
+    @needs_cuda
+    @pytest.mark.parametrize("interpolation", [transforms.InterpolationMode.NEAREST, transforms.InterpolationMode.BILINEAR])
+    def test_image_cvcuda_correctness(self, interpolation):
+        image = make_image_cvcuda(dtype=torch.uint8)
+        displacement = self._make_displacement(image)
+        result = F.cvcuda_to_tensor(F.elastic(image, displacement=displacement, interpolation=interpolation))
+        expected = F.elastic_image(F.cvcuda_to_tensor(image), displacement=displacement, interpolation=interpolation)
+        assert_close(result, expected, atol=get_max_value(torch.uint8), rtol=0)
+        mae = (expected.float() - result.float()).abs().mean()
+        mae_threshold = 30.0 if interpolation is transforms.InterpolationMode.NEAREST else 20.0
+        assert mae < mae_threshold, f"MAE {mae} exceeds threshold"
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("interpolation", [transforms.InterpolationMode.NEAREST, transforms.InterpolationMode.BILINEAR])
+    @pytest.mark.parametrize("pixels", [0.0, 1.0, 0.25])
+    def test_cvcuda_known_displacement(self, shape, dtype, interpolation, pixels):
+        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
+        displacement = torch.zeros(1, 11, 13, 2, device="cuda")
+        displacement[..., 0] = 2 * pixels / 13
+        kwargs = dict(displacement=displacement, interpolation=interpolation, fill=7)
+        actual = F.cvcuda_to_tensor(F.elastic(F.to_cvcuda_tensor(image), **kwargs))
+        torch.testing.assert_close(actual, F.elastic(image, **kwargs), atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
+        if interpolation == transforms.InterpolationMode.NEAREST and pixels in (0.0, 1.0):
+            known = image.clone()
+            if pixels == 1.0:
+                known[..., :-1] = image[..., 1:]
+                known[..., -1] = 7
+            torch.testing.assert_close(actual, known, atol=0, rtol=0)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("shape", [(11, 13, 2), (2, 11, 13, 2), (1, 10, 13, 2), (1, 11, 13, 3)])
+    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_cvcuda])
+    def test_displacement_shape_errors(self, shape, make_input):
+        with pytest.raises(ValueError, match="Argument displacement shape should be"):
+            F.elastic(make_input((11, 13)), torch.zeros(shape, device="cuda"))
 
 
 class TestToPureTensor:
