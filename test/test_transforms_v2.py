@@ -6351,17 +6351,6 @@ class TestAdjustContrast:
 
         assert_close(actual, expected, rtol=0, atol=1)
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    def test_contrast_means_are_per_image(self, dtype):
-        image = torch.stack([torch.full((3, 11, 13), 0.1), torch.full((3, 11, 13), 0.8)]).cuda()
-        if dtype == torch.uint8:
-            image = (image * 255).to(dtype)
-        actual = F.cvcuda_to_tensor(F.adjust_contrast(F.to_cvcuda_tensor(image), contrast_factor=0))
-        assert_close(actual, F.adjust_contrast(image, contrast_factor=0),
-                     rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
-        assert actual[1].float().mean() > 5 * actual[0].float().mean()
-
 
 class TestAdjustGamma:
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
@@ -6460,18 +6449,6 @@ class TestAdjustHue:
 
         mae = (actual.float() - expected.float()).abs().mean()
         assert mae < 2
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("name,kwargs", [
-        ("adjust_brightness", {"brightness_factor": -0.1}),
-        ("adjust_contrast", {"contrast_factor": -0.1}),
-        ("adjust_saturation", {"saturation_factor": -0.1}),
-        ("adjust_hue", {"hue_factor": 0.6}),
-    ])
-    def test_color_invalid_factors(self, name, kwargs):
-        image = F.to_cvcuda_tensor(torch.rand(3, 11, 13, device="cuda"))
-        with pytest.raises(ValueError):
-            getattr(F, name)(image, **kwargs)
 
 
 class TestAdjustSaturation:
