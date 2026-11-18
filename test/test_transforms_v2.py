@@ -5250,6 +5250,7 @@ class TestPerspective:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -5265,9 +5266,13 @@ class TestPerspective:
             (F.perspective_mask, tv_tensors.Mask),
             (F.perspective_video, tv_tensors.Video),
             (F.perspective_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.perspective, input_type)
         check_functional_kernel_signature_match(F.perspective, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("distortion_scale", [0.5, 0.0, 1.0])
@@ -5281,6 +5286,7 @@ class TestPerspective:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_transform(self, distortion_scale, make_input):
@@ -5294,12 +5300,18 @@ class TestPerspective:
     @pytest.mark.parametrize("coefficients", COEFFICIENTS)
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
-    def test_image_functional_correctness(self, coefficients, interpolation, fill):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
+    def test_image_functional_correctness(self, coefficients, interpolation, fill, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.perspective(
             image, startpoints=None, endpoints=None, coefficients=coefficients, interpolation=interpolation, fill=fill
         )
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(
             F.perspective(
                 F.to_pil_image(image),
@@ -5311,13 +5323,51 @@ class TestPerspective:
             )
         )
 
-        if interpolation == "bilinear":
-            abs_diff = (actual.float() - expected.float()).abs()
-            assert (abs_diff > 1).float().mean() < 7e-2
-            mae = abs_diff.mean()
-            assert mae < 3
+        if make_input is make_image:
+            if interpolation == "bilinear":
+                abs_diff = (actual.float() - expected.float()).abs()
+                assert (abs_diff > 1).float().mean() < 7e-2
+                mae = abs_diff.mean()
+                assert mae < 3
+            else:
+                assert_equal(actual, expected)
         else:
-            assert_equal(actual, expected)
+            tolerance = 255 if interpolation == "nearest" else 125
+            assert_close(actual, expected, rtol=0, atol=tolerance)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
+    @pytest.mark.parametrize("coefficients", [[1., 0., 0., 0., 1., 0., 0., 0.], [1., 0., 2., 0., 1., 3., 0., 0.]])
+    def test_cvcuda_identity_and_translation(self, dtype, shape, coefficients):
+        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
+        kwargs = dict(startpoints=None, endpoints=None, coefficients=coefficients, interpolation="nearest", fill=7)
+        actual = F.cvcuda_to_tensor(F.perspective(F.to_cvcuda_tensor(image), **kwargs))
+        torch.testing.assert_close(actual, F.perspective(image, **kwargs), atol=0, rtol=0)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13), (3, 23, 29), (2, 3, 23, 29)])
+    @pytest.mark.parametrize("dtype,fill", [
+        (torch.uint8, 7),
+        (torch.float32, 0.2),
+        pytest.param(torch.float32, 7, marks=pytest.mark.xfail(
+            strict=True, raises=AssertionError, reason="Released FP32 high-fill perspective exceeds 2e-5"
+        )),
+    ])
+    def test_cvcuda_random_perspective(self, shape, dtype, fill):
+        torch.manual_seed(23)
+        image = torch.rand(shape, device="cuda")
+        if len(shape) == 4:
+            image[0].mul_(0.1)
+        if dtype == torch.uint8:
+            image = (image * 255).to(dtype)
+        transform = transforms.RandomPerspective(distortion_scale=0.3, p=1, fill=fill)
+        torch.manual_seed(17)
+        expected = transform(image.clone())
+        torch.manual_seed(17)
+        actual = transform(F.to_cvcuda_tensor(image.clone()))
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
 
     def _reference_perspective_bounding_boxes(self, bounding_boxes, *, startpoints, endpoints):
         format = bounding_boxes.format
