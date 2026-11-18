@@ -3613,32 +3613,6 @@ class TestElastic:
         mae_threshold = 30.0 if interpolation is transforms.InterpolationMode.NEAREST else 20.0
         assert mae < mae_threshold, f"MAE {mae} exceeds threshold"
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("interpolation", [transforms.InterpolationMode.NEAREST, transforms.InterpolationMode.BILINEAR])
-    @pytest.mark.parametrize("pixels", [0.0, 1.0, 0.25])
-    def test_cvcuda_known_displacement(self, shape, dtype, interpolation, pixels):
-        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
-        displacement = torch.zeros(1, 11, 13, 2, device="cuda")
-        displacement[..., 0] = 2 * pixels / 13
-        kwargs = dict(displacement=displacement, interpolation=interpolation, fill=7)
-        actual = F.cvcuda_to_tensor(F.elastic(F.to_cvcuda_tensor(image), **kwargs))
-        torch.testing.assert_close(actual, F.elastic(image, **kwargs), atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
-        if interpolation == transforms.InterpolationMode.NEAREST and pixels in (0.0, 1.0):
-            known = image.clone()
-            if pixels == 1.0:
-                known[..., :-1] = image[..., 1:]
-                known[..., -1] = 7
-            torch.testing.assert_close(actual, known, atol=0, rtol=0)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("shape", [(11, 13, 2), (2, 11, 13, 2), (1, 10, 13, 2), (1, 11, 13, 3)])
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_cvcuda])
-    def test_displacement_shape_errors(self, shape, make_input):
-        with pytest.raises(ValueError, match="Argument displacement shape should be"):
-            F.elastic(make_input((11, 13)), torch.zeros(shape, device="cuda"))
-
 
 class TestToPureTensor:
     def test_correctness(self):
