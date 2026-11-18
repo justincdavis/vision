@@ -4074,7 +4074,7 @@ class TestErase:
 
         if make_input is make_image_cvcuda and value == "random":
             # CV-CUDA samples random fill independently of the Torch kernel.
-            assert_close(actual, expected, rtol=0, atol=256)
+            assert_close(F.cvcuda_to_tensor(actual)[0].cpu(), expected, rtol=0, atol=256)
         else:
             assert_equal(actual, expected)
 
