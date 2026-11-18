@@ -467,7 +467,6 @@ functionals
     :toctree: generated/
     :template: functional.rst
 
-    v2.functional.as_cvcuda_tensor
     v2.functional.to_cvcuda_tensor
     v2.functional.cvcuda_to_tensor
     v2.functional.to_image
@@ -480,10 +479,11 @@ CV-CUDA backend
 ^^^^^^^^^^^^^^^
 
 CV-CUDA >= 0.19.0 is an optional dependency. Opt in explicitly by wrapping
-CHW or NCHW Torch images with :func:`v2.functional.as_cvcuda_tensor` (zero-copy,
-contiguous CUDA inputs only) or :class:`v2.ToCVCUDATensor` (also transfers CPU
-inputs and makes non-contiguous inputs contiguous). Values, dtype, shape and
-CUDA device are preserved; no channel permutation or value scaling is performed.
+CHW or NCHW Torch images with :func:`v2.functional.to_cvcuda_tensor` or
+the equivalent :class:`v2.ToCVCUDATensor` transform. Contiguous CUDA inputs share
+storage; CPU inputs are uploaded and non-contiguous inputs are copied. Values,
+dtype, shape and CUDA device are preserved; no channel permutation or value
+scaling is performed.
 CV-CUDA operations do not support autograd: detach inputs explicitly if needed.
 
 Only ``cvcuda.Tensor`` inputs dispatch to ``cvcuda.tv``. Ordinary Torch tensors
