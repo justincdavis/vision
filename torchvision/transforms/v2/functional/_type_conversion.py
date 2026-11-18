@@ -40,23 +40,6 @@ def _validate_cvcuda_input(inpt):
 
 
 @torch.jit.unused
-def as_cvcuda_tensor(inpt: torch.Tensor):
-    """Wrap a contiguous CUDA tensor without copying, preserving CHW/NCHW layout and device.
-
-    The returned tensor shares storage with the input. CV-CUDA does not support autograd.
-    """
-    _validate_cvcuda_input(inpt)
-    cvcuda = _import_cvcuda()
-    if inpt.device.type != "cuda" or not inpt.is_contiguous():
-        raise ValueError("as_cvcuda_tensor requires a contiguous CUDA tensor. Use to_cvcuda_tensor to copy.")
-    interface = dict(inpt.__cuda_array_interface__)
-    interface.update(version=3, stream=torch.cuda.current_stream(inpt.device).cuda_stream or -1)
-    owner = SimpleNamespace(_tensor=inpt, __cuda_array_interface__=interface)
-    with torch.cuda.device(inpt.device):
-        return cvcuda.as_tensor(owner, "CHW" if inpt.ndim == 3 else "NCHW")
-
-
-@torch.jit.unused
 def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
     """Convert a CHW/NCHW Torch tensor to CV-CUDA without scaling or permuting values.
 
@@ -64,11 +47,16 @@ def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
     ``device`` is specified. Non-contiguous inputs are copied. Otherwise storage is shared.
     """
     _validate_cvcuda_input(inpt)
-    _import_cvcuda()
+    cvcuda = _import_cvcuda()
     device = torch.device(device) if device is not None else (inpt.device if inpt.is_cuda else torch.device("cuda"))
     if device.type != "cuda":
         raise ValueError("CV-CUDA tensors require a CUDA device.")
-    return as_cvcuda_tensor(inpt.to(device=device).contiguous())
+    inpt = inpt.to(device=device).contiguous()
+    interface = dict(inpt.__cuda_array_interface__)
+    interface.update(version=3, stream=torch.cuda.current_stream(inpt.device).cuda_stream or -1)
+    owner = SimpleNamespace(_tensor=inpt, __cuda_array_interface__=interface)
+    with torch.cuda.device(inpt.device):
+        return cvcuda.as_tensor(owner, "CHW" if inpt.ndim == 3 else "NCHW")
 
 
 @torch.jit.unused
