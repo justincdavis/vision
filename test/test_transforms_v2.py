@@ -4110,6 +4110,7 @@ class TestGaussianBlur:
         check_kernel(F.gaussian_blur_video, make_video(), kernel_size=(3, 3))
 
     @pytest.mark.needs_cvcuda
+    @pytest.mark.xfail(strict=True, raises=RuntimeError, reason="cvcuda.tv 0.19 F64 GaussianBlur raises RuntimeError instead of the original ValueError")
     def test_functional_error_cvcuda(self):
         with pytest.raises(ValueError, match="CV-CUDA's GaussianBlur only supports float32 and uint8 dtype"):
             F.gaussian_blur(make_image_cvcuda(dtype=torch.float64), kernel_size=(3, 3), sigma=0.8)
@@ -4204,9 +4205,17 @@ class TestGaussianBlur:
             ((1, 26, 28), (23, 23), 1.7),
         ],
     )
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32, torch.float64, torch.float16])
+    @pytest.mark.parametrize("dtype,input_type", [
+        pytest.param(dtype, input_type, marks=(
+            [pytest.mark.needs_cvcuda] + ([pytest.mark.xfail(
+                strict=True, raises=RuntimeError, reason="cvcuda.tv 0.19 GaussianBlur does not support F64"
+            )] if dtype is torch.float64 else [])
+            if input_type == "cvcuda.Tensor" else []
+        ))
+        for dtype in [torch.uint8, torch.float32, torch.float64, torch.float16]
+        for input_type in [tv_tensors.Image, "cvcuda.Tensor"]
+    ])
     @pytest.mark.parametrize("device", cpu_and_cuda())
-    @pytest.mark.parametrize("input_type", [tv_tensors.Image, pytest.param("cvcuda.Tensor", marks=pytest.mark.needs_cvcuda)])
     def test_functional_image_correctness(self, dimensions, kernel_size, sigma, dtype, device, input_type):
         if dtype is torch.float16 and device == "cpu":
             pytest.skip("The CPU implementation of float16 on CPU differs from opencv")
