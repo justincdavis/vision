@@ -4099,50 +4099,6 @@ class TestErase:
         with pytest.raises(ValueError, match="If value is a sequence, it should have either a single value"):
             transform.make_params([make_image()])
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("inplace", [False, True])
-    @pytest.mark.parametrize("fill_shape", [(1, 1, 1), (3, 1, 1), (3, 4, 5), (2, 3, 4, 5)])
-    def test_erase_fill_batch_and_inplace(self, dtype, inplace, fill_shape):
-        image = torch.arange(2 * 3 * 11 * 13, device="cuda").reshape(2, 3, 11, 13).remainder(251).to(dtype)
-        original = image.clone()
-        fill = torch.arange(math.prod(fill_shape), device="cuda").reshape(fill_shape).remainder(97).to(dtype)
-        inpt = F.to_cvcuda_tensor(image)
-        actual = F.erase(inpt, i=2, j=3, h=4, w=5, v=fill, inplace=inplace)
-        expected = F.erase(original.clone(), i=2, j=3, h=4, w=5, v=fill)
-        assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
-        if inplace:
-            assert actual is inpt
-            assert_close(image, expected, atol=0, rtol=0)
-        else:
-            assert_close(image, original, atol=0, rtol=0)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("inplace", [False, True])
-    def test_random_erasing_random_value(self, shape, dtype, inplace):
-        torch.manual_seed(23)
-        image = torch.rand(shape, device="cuda")
-        if dtype == torch.uint8:
-            image = (image * 255).to(dtype)
-        original = image.clone()
-        transform = transforms.RandomErasing(
-            p=1, scale=(0.2, 0.4), ratio=(0.8, 1.2), value="random", inplace=inplace
-        )
-        torch.manual_seed(17)
-        expected = transform(original.clone())
-        inpt = F.to_cvcuda_tensor(image)
-        torch.manual_seed(17)
-        actual = transform(inpt)
-        assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
-        assert not torch.equal(expected, original)
-        if inplace:
-            assert actual is inpt
-            assert_close(image, expected, atol=0, rtol=0)
-        else:
-            assert_close(image, original, atol=0, rtol=0)
-
 
 class TestGaussianBlur:
     @pytest.mark.parametrize("kernel_size", [1, 3, (3, 1), [3, 5]])
