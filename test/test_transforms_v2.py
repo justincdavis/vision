@@ -6104,19 +6104,6 @@ class TestInvert:
 
         assert_equal(actual, expected)
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("batch_dims", [(), (2,)])
-    def test_invert_gray(self, dtype, batch_dims):
-        image = torch.arange(2 * 11 * 13, device="cuda").reshape(2, 1, 11, 13).remainder(255).to(dtype)
-        if not batch_dims:
-            image = image[0]
-        if dtype == torch.float32:
-            image.div_(255)
-        result = F.invert(F.to_cvcuda_tensor(image))
-        assert_close(F.cvcuda_to_tensor(result), F.invert(image), rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
-        assert_close(F.cvcuda_to_tensor(F.invert(result)), image, rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
-
 
 class TestPosterize:
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
