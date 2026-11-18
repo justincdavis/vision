@@ -235,9 +235,23 @@ def check_functional_kernel_signature_match(functional, *, kernel, input_type):
     if _is_cvcuda_available() and input_type is _import_cvcuda().Tensor:
         stream = kernel_params.pop()
         assert stream.name == "stream" and stream.kind is inspect.Parameter.KEYWORD_ONLY and stream.default is None
-        assert [param.replace(annotation=inspect.Parameter.empty) for param in functional_params] == [
-            param.replace(annotation=inspect.Parameter.empty) for param in kernel_params
-        ]
+        if functional is F.gaussian_noise:
+            seed = kernel_params.pop()
+            assert seed.name == "seed" and seed.kind is inspect.Parameter.KEYWORD_ONLY and seed.default is None
+
+        def normalize(param):
+            from enum import Enum
+
+            default = param.default
+            if isinstance(default, Enum):
+                default = default.value
+            elif isinstance(default, torch.dtype):
+                default = str(default).removeprefix("torch.")
+            elif isinstance(default, type) and issubclass(default, np.generic):
+                default = np.dtype(default).name
+            return param.replace(annotation=inspect.Parameter.empty, default=default)
+
+        assert list(map(normalize, functional_params)) == list(map(normalize, kernel_params))
         return
 
     if issubclass(input_type, tv_tensors.TVTensor):
