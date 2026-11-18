@@ -20,7 +20,8 @@ import torch.testing
 from torch.testing._comparison import BooleanPair, NonePair, not_close_error_metas, NumberPair, TensorLikePair
 from torchvision import tv_tensors
 from torchvision.transforms._functional_tensor import _max_value as get_max_value
-from torchvision.transforms.v2.functional import to_image, to_pil_image
+from torchvision.transforms.v2.functional import cvcuda_to_tensor, to_cvcuda_tensor, to_image, to_pil_image
+from torchvision.transforms.v2.functional._cvcuda import _is_cvcuda_available, _is_cvcuda_tensor
 from torchvision.utils import _Image_fromarray
 
 
@@ -28,6 +29,7 @@ IN_OSS_CI = any(os.getenv(var) == "true" for var in ["CIRCLECI", "GITHUB_ACTIONS
 IN_RE_WORKER = os.environ.get("INSIDE_RE_WORKER") is not None
 IN_FBCODE = os.environ.get("IN_FBCODE_TORCHVISION") == "1"
 CUDA_NOT_AVAILABLE_MSG = "CUDA device not available"
+CVCUDA_NOT_AVAILABLE_MSG = "CV-CUDA >= 0.19.0 not available"
 MPS_NOT_AVAILABLE_MSG = "MPS device not available"
 OSS_CI_GPU_NO_CUDA_MSG = "We're in an OSS GPU machine, and this test doesn't need cuda."
 
@@ -131,6 +133,10 @@ def needs_cuda(test_func):
     import pytest  # noqa
 
     return pytest.mark.needs_cuda(test_func)
+
+
+def needs_cvcuda(test_func):
+    return pytest.mark.needs_cvcuda(test_func)
 
 
 def needs_mps(test_func):
@@ -285,8 +291,18 @@ class ImagePair(TensorLikePair):
         mae=False,
         **other_parameters,
     ):
-        if all(isinstance(input, PIL.Image.Image) for input in [actual, expected]):
-            actual, expected = (to_image(input) for input in [actual, expected])
+        cvcuda_pair = _is_cvcuda_tensor(actual) or _is_cvcuda_tensor(expected)
+        actual, expected = (
+            to_image(input) if isinstance(input, PIL.Image.Image) else input for input in [actual, expected]
+        )
+        if cvcuda_pair:
+            actual, expected = (
+                cvcuda_to_tensor(input).cpu() if _is_cvcuda_tensor(input) else input for input in [actual, expected]
+            )
+            if actual.ndim == 4 and actual.shape[0] == 1 and expected.ndim == 3:
+                actual = actual[0]
+            elif expected.ndim == 4 and expected.shape[0] == 1 and actual.ndim == 3:
+                expected = expected[0]
 
         super().__init__(actual, expected, **other_parameters)
         self.mae = mae
@@ -399,6 +415,10 @@ def make_image_tensor(*args, **kwargs):
 
 def make_image_pil(*args, **kwargs):
     return to_pil_image(make_image(*args, **kwargs))
+
+
+def make_image_cvcuda(*args, batch_dims=(1,), **kwargs):
+    return to_cvcuda_tensor(make_image(*args, batch_dims=batch_dims, **kwargs))
 
 
 def make_keypoints(canvas_size=DEFAULT_SIZE, *, num_points=4, dtype=None, device="cpu"):
