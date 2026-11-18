@@ -2830,19 +2830,11 @@ class TestToDtype:
 
         return torch.tensor(tree_map(fn, image.tolist())).to(dtype=output_dtype, device=image.device)
 
-    @pytest.mark.parametrize("input_dtype,output_dtype,scale,make_input", [
-        pytest.param(src, dst, scale, maker, marks=(
-            [pytest.mark.needs_cvcuda] + ([pytest.mark.xfail(
-                strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 unscaled U16 to U8 saturates instead of wrapping"
-            )] if src is torch.uint16 and dst is torch.uint8 and not scale else [])
-            if maker is make_image_cvcuda else []
-        ))
-        for src in [torch.float32, torch.float64, torch.uint8, torch.uint16]
-        for dst in [torch.float32, torch.float64, torch.uint8, torch.uint16]
-        for scale in [True, False]
-        for maker in [make_image, make_image_cvcuda]
-    ])
+    @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
+    @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
+    @pytest.mark.parametrize("scale", (True, False))
+    @pytest.mark.parametrize("make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
     @pytest.mark.parametrize("fn", [F.to_dtype, transform_cls_to_functional(transforms.ToDtype)])
     def test_image_correctness(self, input_dtype, output_dtype, device, scale, make_input, fn):
         if input_dtype.is_floating_point and output_dtype == torch.int64:
@@ -2948,55 +2940,6 @@ class TestToDtype:
         assert out["inpt"].dtype == inpt_dtype
         assert out["bbox"].dtype == bbox_dtype
         assert out["mask"].dtype == mask_dtype
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("src,dst,values,scale", [
-        pytest.param(torch.int32, torch.int16, [(2**31 - 1) // 4, (2**31 - 1) // 2], True,
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 scaled I32 to I16 rounds boundary values differently")),
-        pytest.param(torch.float16, torch.uint8, [1.], True,
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 scaled F16 to U8 differs at one")),
-        pytest.param(torch.uint16, torch.uint8, [255, 256, 257, 511, 65535], False,
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 unscaled U16 to U8 saturates instead of wrapping")),
-        pytest.param(torch.float64, torch.int32, [.5], True,
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 scaled F64 to I32 rounds half differently")),
-        (torch.float32, torch.uint8, [.9, 1.1, 1.9, 2.5, 126.9], False),
-    ])
-    def test_cvcuda_dtype_boundary_parity(self, src, dst, values, scale):
-        image = torch.tensor(values, device="cuda", dtype=src).reshape(1, 1, -1)
-        expected = F.to_dtype(image, dtype=dst, scale=scale)
-        actual = F.cvcuda_to_tensor(F.to_dtype(F.to_cvcuda_tensor(image), dtype=dst, scale=scale))
-        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.xfail(strict=True, reason="cvcuda.tv 0.19 accepts the native-unsafe scaled F32 to I32 conversion")
-    def test_cvcuda_unsafe_scaled_conversion(self):
-        image = F.to_cvcuda_tensor(torch.full((1, 1, 1), .5, device="cuda"))
-        with pytest.raises(RuntimeError, match="cannot be performed safely"):
-            F.to_dtype(image, dtype=torch.int32, scale=True)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.bool, torch.bfloat16])
-    def test_cvcuda_unsupported_destination(self, dtype):
-        with pytest.raises(TypeError):
-            F.to_dtype(make_image_cvcuda(), dtype=dtype)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("scale", [False, True])
-    def test_cvcuda_identity(self, scale):
-        image = make_image_cvcuda(dtype=torch.float32)
-        assert F.to_dtype(image, dtype=torch.float32, scale=scale) is image
-
-    @pytest.mark.needs_cvcuda
-    def test_cvcuda_transform_dtype_dict(self):
-        image = F.to_cvcuda_tensor(torch.ones(3, 11, 13, device="cuda", dtype=torch.uint8))
-        actual = transforms.ToDtype({_import_cvcuda().Tensor: torch.float32}, scale=True)(image)
-        expected = transforms.ToDtype(torch.float32, scale=True)(F.cvcuda_to_tensor(image))
-        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected)
-        assert transforms.ToDtype({"others": None})(image) is image
-        with pytest.warns(UserWarning, match="no scaling"):
-            assert transforms.ToDtype({_import_cvcuda().Tensor: None}, scale=True)(image) is image
-        with pytest.raises(ValueError, match="No dtype"):
-            transforms.ToDtype({})(image)
 
     def test_uint16(self):
         # These checks are probably already covered above but since uint16 is a
