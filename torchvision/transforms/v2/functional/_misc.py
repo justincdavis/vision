@@ -11,7 +11,7 @@ from torchvision.transforms.functional import pil_to_tensor, to_pil_image
 
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _is_cvcuda_available, _register_cvcuda_kernel, tv
+from ._cvcuda import _import_cvcuda, _is_cvcuda_available, _register_cvcuda_kernel
 from ._meta import _convert_bounding_box_format
 
 from ._utils import _get_kernel, _register_kernel_internal, is_pure_tensor
@@ -519,4 +519,4 @@ def _get_sanitize_keypoints_mask(
 
 
 if _is_cvcuda_available():
-    _register_cvcuda_kernel(gaussian_noise, tv.gaussian_noise)
+    _register_cvcuda_kernel(gaussian_noise, _import_cvcuda().tv.gaussian_noise)
