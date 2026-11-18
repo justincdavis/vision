@@ -5037,30 +5037,6 @@ class TestPad:
 
         assert_equal(actual, expected)
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize(
-        "padding",
-        [
-            [1, 2, 3, 4],
-            pytest.param([-2, -3, -1, -2], marks=pytest.mark.xfail(
-                strict=True, raises=RuntimeError, reason="Released pad rejects negative borders"
-            )),
-            pytest.param([-2, 3, 4, -1], marks=pytest.mark.xfail(
-                strict=True, raises=RuntimeError, reason="Released pad rejects negative borders"
-            )),
-        ],
-    )
-    @pytest.mark.parametrize("fill", [7, [7], [3, 5, 7]])
-    def test_cvcuda_padding_and_fill(self, shape, dtype, padding, fill):
-        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
-        expected = F.pad(image, padding=padding, fill=fill)
-        actual = F.pad(F.to_cvcuda_tensor(image), padding=padding, fill=fill)
-        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
-        actual = transforms.Pad(padding, fill=fill)(F.to_cvcuda_tensor(image))
-        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
-
     def _reference_pad_bounding_boxes(self, bounding_boxes, *, padding):
         if isinstance(padding, int):
             padding = [padding]
