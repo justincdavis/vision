@@ -8,7 +8,7 @@ from torchvision.io import decode_jpeg, encode_jpeg
 from torchvision.transforms.functional import pil_to_tensor, to_pil_image
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _is_cvcuda_available, _register_cvcuda_kernel, tv
+from ._cvcuda import _import_cvcuda, _is_cvcuda_available, _register_cvcuda_kernel
 from ._utils import _get_kernel, _register_kernel_internal
 
 
@@ -32,7 +32,7 @@ def erase(
 
 
 if _is_cvcuda_available():
-    _register_cvcuda_kernel(erase, tv.erase)
+    _register_cvcuda_kernel(erase, _import_cvcuda().tv.erase)
 
 
 @_register_kernel_internal(erase, torch.Tensor)
