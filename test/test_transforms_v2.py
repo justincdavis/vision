@@ -5722,6 +5722,7 @@ class TestEqualize:
             image = F.to_cvcuda_tensor(image)
         actual = fn(image)
         if is_cvcuda:
+            actual = F.cvcuda_to_tensor(actual).cpu()
             image = F.cvcuda_to_tensor(image).cpu()
         expected = F.to_image(F.equalize(F.to_pil_image(image)))
 
