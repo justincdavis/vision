@@ -8388,24 +8388,35 @@ class TestUtils:
 @pytest.mark.needs_cvcuda
 class TestCVCUDASharedStream:
     def test_shared_stream(self, monkeypatch):
-        cvcuda = _import_cvcuda()
-        stream = torch.cuda.Stream()
-        original = cvcuda.as_stream
+        from torchvision.transforms.v2.functional._cvcuda import _register_cvcuda_kernel
+        from torchvision.transforms.v2.functional._utils import _KERNEL_REGISTRY
 
-        def as_stream(handle):
-            assert handle == stream.cuda_stream
-            return original(handle)
+        torch_stream = torch.cuda.Stream()
+        received = []
 
-        monkeypatch.setattr(cvcuda, "as_stream", as_stream)
-        with torch.cuda.stream(stream):
-            F.horizontal_flip(make_image_cvcuda())
-        stream.synchronize()
+        def functional(image):
+            return _get_kernel(functional, type(image))(image)
+
+        def kernel(image, *, stream):
+            received.append(stream.handle)
+            assert stream.handle == torch_stream.cuda_stream
+            return image
+
+        monkeypatch.setitem(_KERNEL_REGISTRY, functional, {})
+        _register_cvcuda_kernel(functional, kernel)
+        with torch.cuda.stream(torch_stream):
+            functional(make_image_cvcuda())
+        assert received == [torch_stream.cuda_stream]
 
     def test_shared_stream_negative(self):
         cvcuda = _import_cvcuda()
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            assert cvcuda.Stream.current.handle != stream.cuda_stream
+        torch_stream = torch.cuda.Stream()
+
+        def kernel(*, stream):
+            assert stream.handle != torch_stream.cuda_stream
+
+        with torch.cuda.stream(torch_stream):
+            kernel(stream=cvcuda.Stream.current)
 
     @pytest.mark.parametrize("shape", [(3, 127, 129), (2, 3, 127, 129)])
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
