@@ -2831,7 +2831,11 @@ class TestAdjustBrightness:
     def test_kernel(self, kernel, make_input, dtype, device):
         check_kernel(kernel, make_input(dtype=dtype, device=device), brightness_factor=self._DEFAULT_BRIGHTNESS_FACTOR)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_brightness, make_input(), brightness_factor=self._DEFAULT_BRIGHTNESS_FACTOR)
 
@@ -2842,19 +2846,32 @@ class TestAdjustBrightness:
             (F._color._adjust_brightness_image_pil, PIL.Image.Image),
             (F.adjust_brightness_image, tv_tensors.Image),
             (F.adjust_brightness_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_brightness, input_type)
         check_functional_kernel_signature_match(F.adjust_brightness, kernel=kernel, input_type=input_type)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("brightness_factor", _CORRECTNESS_BRIGHTNESS_FACTORS)
-    def test_image_correctness(self, brightness_factor):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_image_correctness(self, make_input, brightness_factor):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.adjust_brightness(image, brightness_factor=brightness_factor)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_brightness(F.to_pil_image(image), brightness_factor=brightness_factor))
 
-        torch.testing.assert_close(actual, expected)
+        if make_input is make_image_cvcuda:
+            assert_close(actual, expected, rtol=0, atol=1)
+        else:
+            torch.testing.assert_close(actual, expected)
 
 
 class TestCutMixMixUp:
@@ -6121,7 +6138,11 @@ class TestAdjustContrast:
     def test_kernel_video(self):
         check_kernel(F.adjust_contrast_video, make_video(), contrast_factor=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_contrast, make_input(), contrast_factor=0.5)
 
@@ -6132,9 +6153,13 @@ class TestAdjustContrast:
             (F._color._adjust_contrast_image_pil, PIL.Image.Image),
             (F.adjust_contrast_image, tv_tensors.Image),
             (F.adjust_contrast_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_contrast, input_type)
         check_functional_kernel_signature_match(F.adjust_contrast, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -6144,14 +6169,31 @@ class TestAdjustContrast:
         with pytest.raises(ValueError, match="is not non-negative"):
             F.adjust_contrast(make_image(), contrast_factor=-1)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("contrast_factor", [0.1, 0.5, 1.0])
-    def test_correctness_image(self, contrast_factor):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, contrast_factor):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.adjust_contrast(image, contrast_factor=contrast_factor)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_contrast(F.to_pil_image(image), contrast_factor=contrast_factor))
 
         assert_close(actual, expected, rtol=0, atol=1)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_contrast_means_are_per_image(self, dtype):
+        image = torch.stack([torch.full((3, 11, 13), 0.1), torch.full((3, 11, 13), 0.8)]).cuda()
+        if dtype == torch.uint8:
+            image = (image * 255).to(dtype)
+        actual = F.cvcuda_to_tensor(F.adjust_contrast(F.to_cvcuda_tensor(image), contrast_factor=0))
+        assert_close(actual, F.adjust_contrast(image, contrast_factor=0),
+                     rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
+        assert actual[1].float().mean() > 5 * actual[0].float().mean()
 
 
 class TestAdjustGamma:
@@ -6203,7 +6245,11 @@ class TestAdjustHue:
     def test_kernel_video(self):
         check_kernel(F.adjust_hue_video, make_video(), hue_factor=0.25)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_hue, make_input(), hue_factor=0.25)
 
@@ -6214,9 +6260,13 @@ class TestAdjustHue:
             (F._color._adjust_hue_image_pil, PIL.Image.Image),
             (F.adjust_hue_image, tv_tensors.Image),
             (F.adjust_hue_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_hue, input_type)
         check_functional_kernel_signature_match(F.adjust_hue, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -6227,15 +6277,34 @@ class TestAdjustHue:
             with pytest.raises(ValueError, match=re.escape("is not in [-0.5, 0.5]")):
                 F.adjust_hue(make_image(), hue_factor=hue_factor)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("hue_factor", [-0.5, -0.3, 0.0, 0.2, 0.5])
-    def test_correctness_image(self, hue_factor):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, hue_factor):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = F.adjust_hue(image, hue_factor=hue_factor)
+        if make_input is make_image_cvcuda:
+            actual = F.cvcuda_to_tensor(actual)[0].cpu()
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_hue(F.to_pil_image(image), hue_factor=hue_factor))
 
         mae = (actual.float() - expected.float()).abs().mean()
         assert mae < 2
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("name,kwargs", [
+        ("adjust_brightness", {"brightness_factor": -0.1}),
+        ("adjust_contrast", {"contrast_factor": -0.1}),
+        ("adjust_saturation", {"saturation_factor": -0.1}),
+        ("adjust_hue", {"hue_factor": 0.6}),
+    ])
+    def test_color_invalid_factors(self, name, kwargs):
+        image = F.to_cvcuda_tensor(torch.rand(3, 11, 13, device="cuda"))
+        with pytest.raises(ValueError):
+            getattr(F, name)(image, **kwargs)
 
 
 class TestAdjustSaturation:
@@ -6247,7 +6316,11 @@ class TestAdjustSaturation:
     def test_kernel_video(self):
         check_kernel(F.adjust_saturation_video, make_video(), saturation_factor=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_saturation, make_input(), saturation_factor=0.5)
 
@@ -6258,9 +6331,13 @@ class TestAdjustSaturation:
             (F._color._adjust_saturation_image_pil, PIL.Image.Image),
             (F.adjust_saturation_image, tv_tensors.Image),
             (F.adjust_saturation_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_saturation, input_type)
         check_functional_kernel_signature_match(F.adjust_saturation, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -6270,11 +6347,18 @@ class TestAdjustSaturation:
         with pytest.raises(ValueError, match="is not non-negative"):
             F.adjust_saturation(make_image(), saturation_factor=-1)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
+    @pytest.mark.parametrize("color_space", ["RGB", "GRAY"])
     @pytest.mark.parametrize("saturation_factor", [0.1, 0.5, 1.0])
-    def test_correctness_image(self, saturation_factor):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, make_input, color_space, saturation_factor):
+        image = make_input(dtype=torch.uint8, color_space=color_space, device="cpu")
 
         actual = F.adjust_saturation(image, saturation_factor=saturation_factor)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.adjust_saturation(F.to_pil_image(image), saturation_factor=saturation_factor))
 
         assert_close(actual, expected, rtol=0, atol=1)
@@ -6407,7 +6491,8 @@ class TestFiveTenCrop:
 class TestColorJitter:
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -6451,24 +6536,31 @@ class TestColorJitter:
         with pytest.raises(ValueError, match="values should be between"):
             transforms.ColorJitter(hue=1)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("brightness", [None, 0.1, (0.2, 0.3)])
     @pytest.mark.parametrize("contrast", [None, 0.4, (0.5, 0.6)])
     @pytest.mark.parametrize("saturation", [None, 0.7, (0.8, 0.9)])
     @pytest.mark.parametrize("hue", [None, 0.3, (-0.1, 0.2)])
-    def test_transform_correctness(self, brightness, contrast, saturation, hue):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_transform_correctness(self, make_input, brightness, contrast, saturation, hue):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         transform = transforms.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue)
 
         with freeze_rng_state():
             torch.manual_seed(0)
             actual = transform(image)
+            if make_input is make_image_cvcuda:
+                actual = F.cvcuda_to_tensor(actual)[0].cpu()
+                image = F.cvcuda_to_tensor(image)[0].cpu()
 
             torch.manual_seed(0)
             expected = F.to_image(transform(F.to_pil_image(image)))
 
         mae = (actual.float() - expected.float()).abs().mean()
-        assert mae < 2
+        assert mae < (3 if make_input is make_image_cvcuda else 2), f"MAE: {mae}"
 
 
 class TestRgbToGrayscale:
