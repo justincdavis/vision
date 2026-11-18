@@ -3815,7 +3815,8 @@ class TestErase:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_functional(self, make_input):
         check_functional(F.erase, make_input(), **self.FUNCTIONAL_KWARGS)
@@ -3827,25 +3828,33 @@ class TestErase:
             (F._augment._erase_image_pil, PIL.Image.Image),
             (F.erase_image, tv_tensors.Image),
             (F.erase_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.erase, input_type)
         check_functional_kernel_signature_match(F.erase, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
     def test_transform(self, make_input, device):
         input = make_input(device=device)
 
-        with pytest.warns(UserWarning, match="currently passing through inputs of type"):
-            check_transform(
-                transforms.RandomErasing(p=1),
-                input,
-                check_v1_compatibility=not isinstance(input, PIL.Image.Image),
-            )
+        if make_input is make_image_cvcuda:
+            check_transform(transforms.RandomErasing(p=1), input, check_v1_compatibility=False)
+        else:
+            with pytest.warns(UserWarning, match="currently passing through inputs of type"):
+                check_transform(
+                    transforms.RandomErasing(p=1),
+                    input,
+                    check_v1_compatibility=not isinstance(input, PIL.Image.Image),
+                )
 
     def _reference_erase_image(self, image, *, i, j, h, w, v):
         mask = torch.zeros_like(image, dtype=torch.bool)
@@ -3860,16 +3869,26 @@ class TestErase:
 
         return erased_image
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
-    def test_functional_image_correctness(self, dtype, device):
-        image = make_image(dtype=dtype, device=device)
+    def test_functional_image_correctness(self, make_input, dtype, device):
+        image = make_input(dtype=dtype, device=device)
 
         actual = F.erase(image, **self.FUNCTIONAL_KWARGS)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = self._reference_erase_image(image, **self.FUNCTIONAL_KWARGS)
 
         assert_equal(actual, expected)
 
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     @param_value_parametrization(
         scale=[(0.1, 0.2), [0.0, 1.0]],
         ratio=[(0.3, 0.7), [0.1, 5.0]],
@@ -3878,14 +3897,14 @@ class TestErase:
     @pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("seed", list(range(5)))
-    def test_transform_image_correctness(self, param, value, dtype, device, seed):
+    def test_transform_image_correctness(self, make_input, param, value, dtype, device, seed):
         if sys.platform == "darwin" and value == "random" and dtype == torch.uint8:
             # Mismatched elements: 10 / 561 (1.8%)
             pytest.skip("Non-deterministic RNG behavior on macOS for random erase with uint8")
 
         transform = transforms.RandomErasing(**{param: value}, p=1)
 
-        image = make_image(dtype=dtype, device=device)
+        image = make_input(dtype=dtype, device=device)
 
         with freeze_rng_state():
             torch.manual_seed(seed)
@@ -3896,9 +3915,15 @@ class TestErase:
             torch.manual_seed(seed)
             actual = transform(image)
 
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = self._reference_erase_image(image, **params)
 
-        assert_equal(actual, expected)
+        if make_input is make_image_cvcuda and value == "random":
+            # CV-CUDA samples random fill independently of the Torch kernel.
+            assert_close(actual, expected, rtol=0, atol=256)
+        else:
+            assert_equal(actual, expected)
 
     def test_transform_errors(self):
         with pytest.raises(TypeError, match="Argument value should be either a number or str or a sequence"):
@@ -3920,6 +3945,50 @@ class TestErase:
 
         with pytest.raises(ValueError, match="If value is a sequence, it should have either a single value"):
             transform.make_params([make_image()])
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("inplace", [False, True])
+    @pytest.mark.parametrize("fill_shape", [(1, 1, 1), (3, 1, 1), (3, 4, 5), (2, 3, 4, 5)])
+    def test_erase_fill_batch_and_inplace(self, dtype, inplace, fill_shape):
+        image = torch.arange(2 * 3 * 11 * 13, device="cuda").reshape(2, 3, 11, 13).remainder(251).to(dtype)
+        original = image.clone()
+        fill = torch.arange(math.prod(fill_shape), device="cuda").reshape(fill_shape).remainder(97).to(dtype)
+        inpt = F.to_cvcuda_tensor(image)
+        actual = F.erase(inpt, i=2, j=3, h=4, w=5, v=fill, inplace=inplace)
+        expected = F.erase(original.clone(), i=2, j=3, h=4, w=5, v=fill)
+        assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
+        if inplace:
+            assert actual is inpt
+            assert_close(image, expected, atol=0, rtol=0)
+        else:
+            assert_close(image, original, atol=0, rtol=0)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_random_erasing_random_value(self, shape, dtype, inplace):
+        torch.manual_seed(23)
+        image = torch.rand(shape, device="cuda")
+        if dtype == torch.uint8:
+            image = (image * 255).to(dtype)
+        original = image.clone()
+        transform = transforms.RandomErasing(
+            p=1, scale=(0.2, 0.4), ratio=(0.8, 1.2), value="random", inplace=inplace
+        )
+        torch.manual_seed(17)
+        expected = transform(original.clone())
+        inpt = F.to_cvcuda_tensor(image)
+        torch.manual_seed(17)
+        actual = transform(inpt)
+        assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
+        assert not torch.equal(expected, original)
+        if inplace:
+            assert actual is inpt
+            assert_close(image, expected, atol=0, rtol=0)
+        else:
+            assert_close(image, original, atol=0, rtol=0)
 
 
 class TestGaussianBlur:
