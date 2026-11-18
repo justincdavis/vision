@@ -4797,6 +4797,7 @@ class TestPad:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -4815,9 +4816,13 @@ class TestPad:
             (F.pad_bounding_boxes, tv_tensors.BoundingBoxes),
             (F.pad_mask, tv_tensors.Mask),
             (F.pad_video, tv_tensors.Video),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.pad, input_type)
         check_functional_kernel_signature_match(F.pad, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -4830,6 +4835,7 @@ class TestPad:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_transform(self, make_input):
@@ -4854,6 +4860,9 @@ class TestPad:
         with pytest.raises(ValueError, match="Padding mode should be either"):
             transforms.Pad(12, padding_mode="abc")
 
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
     @pytest.mark.parametrize("padding", CORRECTNESS_PADDINGS)
     @pytest.mark.parametrize(
         ("padding_mode", "fill"),
@@ -4863,15 +4872,41 @@ class TestPad:
         ],
     )
     @pytest.mark.parametrize("fn", [F.pad, transform_cls_to_functional(transforms.Pad)])
-    def test_image_correctness(self, padding, padding_mode, fill, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_image_correctness(self, make_input, padding, padding_mode, fill, fn):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
         actual = fn(image, padding=padding, padding_mode=padding_mode, fill=fill)
+        if make_input is make_image_cvcuda:
+            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.pad(F.to_pil_image(image), padding=padding, padding_mode=padding_mode, fill=fill))
 
         assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize(
+        "padding",
+        [
+            [1, 2, 3, 4],
+            pytest.param([-2, -3, -1, -2], marks=pytest.mark.xfail(
+                strict=True, raises=RuntimeError, reason="Released pad rejects negative borders"
+            )),
+            pytest.param([-2, 3, 4, -1], marks=pytest.mark.xfail(
+                strict=True, raises=RuntimeError, reason="Released pad rejects negative borders"
+            )),
+        ],
+    )
+    @pytest.mark.parametrize("fill", [7, [7], [3, 5, 7]])
+    def test_cvcuda_padding_and_fill(self, shape, dtype, padding, fill):
+        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
+        expected = F.pad(image, padding=padding, fill=fill)
+        actual = F.pad(F.to_cvcuda_tensor(image), padding=padding, fill=fill)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
+        actual = transforms.Pad(padding, fill=fill)(F.to_cvcuda_tensor(image))
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=0, rtol=0)
 
     def _reference_pad_bounding_boxes(self, bounding_boxes, *, padding):
         if isinstance(padding, int):
