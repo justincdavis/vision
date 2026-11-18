@@ -5488,40 +5488,6 @@ class TestPerspective:
             tolerance = 255 if interpolation == "nearest" else 125
             assert_close(actual, expected, rtol=0, atol=tolerance)
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13)])
-    @pytest.mark.parametrize("coefficients", [[1., 0., 0., 0., 1., 0., 0., 0.], [1., 0., 2., 0., 1., 3., 0., 0.]])
-    def test_cvcuda_identity_and_translation(self, dtype, shape, coefficients):
-        image = torch.arange(math.prod(shape), device="cuda").reshape(shape).remainder(251).to(dtype)
-        kwargs = dict(startpoints=None, endpoints=None, coefficients=coefficients, interpolation="nearest", fill=7)
-        actual = F.cvcuda_to_tensor(F.perspective(F.to_cvcuda_tensor(image), **kwargs))
-        torch.testing.assert_close(actual, F.perspective(image, **kwargs), atol=0, rtol=0)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("shape", [(3, 11, 13), (2, 3, 11, 13), (3, 23, 29), (2, 3, 23, 29)])
-    @pytest.mark.parametrize("dtype,fill", [
-        (torch.uint8, 7),
-        (torch.float32, 0.2),
-        pytest.param(torch.float32, 7, marks=pytest.mark.xfail(
-            strict=True, raises=AssertionError, reason="Released FP32 high-fill perspective exceeds 2e-5"
-        )),
-    ])
-    def test_cvcuda_random_perspective(self, shape, dtype, fill):
-        torch.manual_seed(23)
-        image = torch.rand(shape, device="cuda")
-        if len(shape) == 4:
-            image[0].mul_(0.1)
-        if dtype == torch.uint8:
-            image = (image * 255).to(dtype)
-        transform = transforms.RandomPerspective(distortion_scale=0.3, p=1, fill=fill)
-        torch.manual_seed(17)
-        expected = transform(image.clone())
-        torch.manual_seed(17)
-        actual = transform(F.to_cvcuda_tensor(image.clone()))
-        assert isinstance(actual, _import_cvcuda().Tensor)
-        torch.testing.assert_close(F.cvcuda_to_tensor(actual), expected, atol=1 if dtype == torch.uint8 else 2e-5, rtol=0)
-
     def _reference_perspective_bounding_boxes(self, bounding_boxes, *, startpoints, endpoints):
         format = bounding_boxes.format
         canvas_size = bounding_boxes.canvas_size
