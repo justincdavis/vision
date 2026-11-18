@@ -6,31 +6,27 @@ from torch.torch_version import TorchVersion
 
 from ._utils import _register_kernel_internal
 
-try:
-    import cvcuda
-except ModuleNotFoundError as error:
-    if error.name != "cvcuda":
-        raise
-    cvcuda = None
-
-if cvcuda is not None and TorchVersion(getattr(cvcuda, "__version__", "0")) >= "0.19.0":
-    from cvcuda import tv
-else:
-    cvcuda = tv = None
-
-
+@functools.lru_cache(maxsize=1)
 def _is_cvcuda_available() -> bool:
-    return cvcuda is not None
+    try:
+        import cvcuda
+    except ModuleNotFoundError as error:
+        if error.name != "cvcuda":
+            raise
+        return False
+    return TorchVersion(getattr(cvcuda, "__version__", "0")) >= "0.19.0"
 
 
 def _import_cvcuda():
-    if cvcuda is None:
+    if not _is_cvcuda_available():
         raise ImportError("CV-CUDA >= 0.19.0 with cvcuda.tv is required for CV-CUDA transforms.")
+    import cvcuda
+
     return cvcuda
 
 
 def _is_cvcuda_tensor(inpt: Any) -> bool:
-    return cvcuda is not None and isinstance(inpt, cvcuda.Tensor)
+    return _is_cvcuda_available() and isinstance(inpt, _import_cvcuda().Tensor)
 
 
 def _validate_cvcuda_image(inpt) -> None:
@@ -46,7 +42,7 @@ def _register_cvcuda_kernel(functional, kernel):
         _validate_cvcuda_image(inpt)
         device = inpt.cuda().__dlpack_device__()[1]
         with torch.cuda.device(device):
-            stream = cvcuda.as_stream(torch.cuda.current_stream(device).cuda_stream)
+            stream = _import_cvcuda().as_stream(torch.cuda.current_stream(device).cuda_stream)
             return kernel(inpt, *args, **kwargs, stream=stream)
 
     _register_kernel_internal(functional, _import_cvcuda().Tensor)(wrapper)
