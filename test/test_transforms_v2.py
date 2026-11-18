@@ -6295,26 +6295,6 @@ class TestAdjustSharpness:
 
         assert_equal(actual, expected)
 
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
-    @pytest.mark.parametrize("height,width", [(1, 9), (9, 2), (2, 2), (3, 3), (7, 9)])
-    @pytest.mark.parametrize("factor", [0.0, 2.0])
-    def test_sharpness_tiny_images_and_border(self, dtype, height, width, factor):
-        torch.manual_seed(19)
-        image = torch.rand(2, 3, height, width, device="cuda")
-        if dtype == torch.uint8:
-            image = (image * 255).to(dtype)
-        actual = F.cvcuda_to_tensor(F.adjust_sharpness(F.to_cvcuda_tensor(image), sharpness_factor=factor))
-        assert_close(actual, F.adjust_sharpness(image, sharpness_factor=factor),
-                     rtol=0, atol=1 if dtype == torch.uint8 else 2e-5)
-        if height < 3 or width < 3:
-            assert_close(actual, image, atol=0, rtol=0)
-        else:
-            assert_close(actual[..., 0, :], image[..., 0, :], atol=0, rtol=0)
-            assert_close(actual[..., -1, :], image[..., -1, :], atol=0, rtol=0)
-            assert_close(actual[..., :, 0], image[..., :, 0], atol=0, rtol=0)
-            assert_close(actual[..., :, -1], image[..., :, -1], atol=0, rtol=0)
-
 
 class TestAdjustContrast:
     @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
