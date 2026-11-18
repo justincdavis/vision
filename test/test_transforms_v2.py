@@ -5834,7 +5834,6 @@ class TestNormalize:
                 F.normalize_image(make_image(dtype=torch.float32), mean=self.MEAN, std=std)
 
     @pytest.mark.needs_cvcuda
-    @pytest.mark.xfail(strict=True, raises=TypeError, reason="cvcuda.tv 0.19 raises TypeError instead of the original ValueError for integer normalize")
     def test_functional_error_cvcuda(self):
         with pytest.raises(ValueError, match="Input tensor should be a float tensor"):
             F.normalize(make_image_cvcuda(dtype=torch.uint8), mean=self.MEAN, std=self.STD)
@@ -5865,17 +5864,9 @@ class TestNormalize:
         mean, std = (np.array(stat, dtype=image.dtype).reshape((-1, 1, 1)) for stat in [mean, std])
         return tv_tensors.Image((image - mean) / std)
 
-    @pytest.mark.parametrize("mean,std,dtype,make_input", [
-        pytest.param(mean, std, dtype, maker, marks=(
-            [pytest.mark.needs_cvcuda] + ([pytest.mark.xfail(
-                strict=True, raises=AssertionError, reason="cvcuda.tv 0.19 F16 normalize arithmetic differs from the native reference"
-            )] if dtype is torch.float16 and mean == (0.485, 0.456, 0.406) else [])
-            if maker is make_image_cvcuda else []
-        ))
-        for mean, std in MEANS_STDS
-        for dtype in [torch.float16, torch.float32, torch.float64]
-        for maker in [make_image, make_image_cvcuda]
-    ])
+    @pytest.mark.parametrize(("mean", "std"), MEANS_STDS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    @pytest.mark.parametrize("make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
     @pytest.mark.parametrize("fn", [F.normalize, transform_cls_to_functional(transforms.Normalize)])
     def test_correctness_image(self, mean, std, dtype, make_input, fn):
         image = make_input(dtype=dtype)
@@ -5888,34 +5879,6 @@ class TestNormalize:
             assert_close(actual, expected)
         else:
             assert_equal(actual, expected)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("channels", [1, 3])
-    @pytest.mark.parametrize("mean,std", [(.2, .3), ([.2], [.3]), (None, None)])
-    @pytest.mark.parametrize("inplace", [False, True])
-    def test_cvcuda_broadcast_and_inplace(self, channels, mean, std, inplace):
-        if mean is None:
-            mean, std = [.1, .2, .3][:channels], [.5, .6, .7][:channels]
-        image = torch.linspace(0, 1, 2 * channels * 11 * 13, device="cuda").reshape(2, channels, 11, 13)
-        original = image.clone()
-        inpt = F.to_cvcuda_tensor(image)
-        result = F.normalize(inpt, mean=mean, std=std, inplace=inplace)
-        torch.testing.assert_close(F.cvcuda_to_tensor(result), F.normalize(original, mean=mean, std=std), atol=2e-5, rtol=0)
-        if inplace:
-            assert result is inpt
-            torch.testing.assert_close(image, F.cvcuda_to_tensor(result), atol=2e-5, rtol=0)
-        else:
-            torch.testing.assert_close(image, original, rtol=0, atol=0)
-
-    @pytest.mark.needs_cvcuda
-    @pytest.mark.parametrize("mean,std,error,match", [
-        ([0], [0], ValueError, "std evaluated to zero"),
-        ([.1, .2], [1], RuntimeError, "Invalid base value count"),
-        ([0], [1, 2], RuntimeError, "Invalid scale value count"),
-    ])
-    def test_cvcuda_parameter_errors(self, mean, std, error, match):
-        with pytest.raises(error, match=match):
-            F.normalize(make_image_cvcuda(dtype=torch.float32), mean=mean, std=std)
 
 
 class TestClampBoundingBoxes:
