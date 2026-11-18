@@ -5906,7 +5906,7 @@ class TestNormalize:
     ])
     def test_cvcuda_parameter_errors(self, mean, std, error, match):
         with pytest.raises(error, match=match):
-            F.normalize(make_image_cvcuda(), mean=mean, std=std)
+            F.normalize(make_image_cvcuda(dtype=torch.float32), mean=mean, std=std)
 
 
 class TestClampBoundingBoxes:
