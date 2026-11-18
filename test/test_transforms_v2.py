@@ -8061,3 +8061,76 @@ class TestUtils:
     def test_no_valid_input(self, query):
         with pytest.raises(TypeError, match="No image"):
             query(["blah"])
+
+
+@pytest.mark.needs_cvcuda
+class TestCVCUDASharedStream:
+    def test_shared_stream(self, monkeypatch):
+        cvcuda = _import_cvcuda()
+        stream = torch.cuda.Stream()
+        original = cvcuda.as_stream
+
+        def as_stream(handle):
+            assert handle == stream.cuda_stream
+            return original(handle)
+
+        monkeypatch.setattr(cvcuda, "as_stream", as_stream)
+        with torch.cuda.stream(stream):
+            F.horizontal_flip(make_image_cvcuda())
+        stream.synchronize()
+
+    def test_shared_stream_negative(self):
+        cvcuda = _import_cvcuda()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            assert cvcuda.Stream.current.handle != stream.cuda_stream
+
+    @pytest.mark.parametrize("shape", [(3, 127, 129), (2, 3, 127, 129)])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    @pytest.mark.parametrize("nondefault", [False, True])
+    def test_wrapper_uses_torch_current_stream(self, monkeypatch, shape, dtype, nondefault):
+        import gc
+
+        cvcuda = _import_cvcuda()
+        calls = []
+        original = cvcuda.as_stream
+
+        def as_stream(handle):
+            calls.append(handle)
+            return original(handle)
+
+        monkeypatch.setattr(cvcuda, "as_stream", as_stream)
+        stream = torch.cuda.Stream() if nondefault else torch.cuda.default_stream()
+        with cvcuda.Stream(), torch.cuda.stream(stream):
+            image = torch.arange(math.prod(shape), device="cuda").reshape(shape).to(dtype)
+            image.add_(1)
+            expected = image.flip(-1).flip(-2)
+            wrapped = F.to_cvcuda_tensor(image)
+            del image
+            gc.collect()
+            result = F.cvcuda_to_tensor(F.vertical_flip(F.horizontal_flip(wrapped)))
+            result.add_(2)
+            expected.add_(2)
+        stream.synchronize()
+        assert calls == [stream.cuda_stream, stream.cuda_stream]
+        assert_close(result, expected, rtol=0, atol=0)
+
+    @pytest.mark.parametrize("shape", [(3, 127, 129), (2, 3, 127, 129)])
+    def test_copy_and_composed_transforms_on_nondefault_stream(self, shape):
+        import gc
+
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            image = torch.rand(shape, device="cuda").transpose(-1, -2)
+            expected = image.flip(-1).flip(-2)
+            pipeline = transforms.Compose([
+                transforms.ToCVCUDATensor(), transforms.RandomHorizontalFlip(p=1),
+                transforms.RandomVerticalFlip(p=1), transforms.CVCUDAToTensor(),
+            ])
+            result = pipeline(image)
+            del image
+            gc.collect()
+            result.mul_(0.5)
+            expected.mul_(0.5)
+        stream.synchronize()
+        assert_close(result, expected, rtol=0, atol=0)
