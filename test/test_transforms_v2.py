@@ -3897,6 +3897,7 @@ class TestErase:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.erase, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.erase
         check_functional_kernel_signature_match(F.erase, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -3931,26 +3932,16 @@ class TestErase:
 
         return erased_image
 
-    @pytest.mark.parametrize(
-        "make_input",
-        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
-    )
     @pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
-    def test_functional_image_correctness(self, make_input, dtype, device):
-        image = make_input(dtype=dtype, device=device)
+    def test_functional_image_correctness(self, dtype, device):
+        image = make_image(dtype=dtype, device=device)
 
         actual = F.erase(image, **self.FUNCTIONAL_KWARGS)
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = self._reference_erase_image(image, **self.FUNCTIONAL_KWARGS)
 
         assert_equal(actual, expected)
 
-    @pytest.mark.parametrize(
-        "make_input",
-        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
-    )
     @param_value_parametrization(
         scale=[(0.1, 0.2), [0.0, 1.0]],
         ratio=[(0.3, 0.7), [0.1, 5.0]],
@@ -3959,14 +3950,14 @@ class TestErase:
     @pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("seed", list(range(5)))
-    def test_transform_image_correctness(self, make_input, param, value, dtype, device, seed):
+    def test_transform_image_correctness(self, param, value, dtype, device, seed):
         if sys.platform == "darwin" and value == "random" and dtype == torch.uint8:
             # Mismatched elements: 10 / 561 (1.8%)
             pytest.skip("Non-deterministic RNG behavior on macOS for random erase with uint8")
 
         transform = transforms.RandomErasing(**{param: value}, p=1)
 
-        image = make_input(dtype=dtype, device=device)
+        image = make_image(dtype=dtype, device=device)
 
         with freeze_rng_state():
             torch.manual_seed(seed)
@@ -3977,15 +3968,40 @@ class TestErase:
             torch.manual_seed(seed)
             actual = transform(image)
 
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = self._reference_erase_image(image, **params)
 
-        if make_input is make_image_cvcuda and value == "random":
-            # CV-CUDA samples random fill independently of the Torch kernel.
-            assert_close(F.cvcuda_to_tensor(actual)[0].cpu(), expected, rtol=0, atol=256)
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_cvcuda_functional_correctness(self, inplace):
+        image = torch.arange(3 * 5 * 7, dtype=torch.uint8).reshape(3, 5, 7)
+        cv_image = F.to_cvcuda_tensor(image)
+        kwargs = dict(i=1, j=2, h=2, w=3, v=torch.tensor([2, 4, 6]).reshape(3, 1, 1))
+        actual = F.erase(cv_image, **kwargs, inplace=inplace)
+        expected = self._reference_erase_image(image, **kwargs)
+        assert_equal(actual, expected)
+        if inplace:
+            assert actual is cv_image
         else:
-            assert_equal(actual, expected)
+            assert actual is not cv_image
+            assert_equal(cv_image, image)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("value", [(0, 1, 0), "random"])
+    def test_cvcuda_transform_correctness(self, value):
+        image = make_image(dtype=torch.uint8)
+        cv_image = F.to_cvcuda_tensor(image)
+        transform = transforms.RandomErasing(p=1, scale=(0.1, 0.2), ratio=(0.3, 0.7), value=value)
+        with freeze_rng_state():
+            torch.manual_seed(0)
+            torch.rand(1)
+            params = transform.make_params([cv_image])
+            torch.manual_seed(0)
+            actual = transform(cv_image)
+        expected = self._reference_erase_image(image, **params)
+        assert_equal(actual, expected)
+        assert_equal(transforms.RandomErasing(p=0)(cv_image), image)
 
     def test_transform_errors(self):
         with pytest.raises(TypeError, match="Argument value should be either a number or str or a sequence"):
