@@ -3990,9 +3990,22 @@ class TestGaussianBlur:
     def test_kernel_video(self):
         check_kernel(F.gaussian_blur_video, make_video(), kernel_size=(3, 3))
 
+    @pytest.mark.needs_cvcuda
+    def test_cvcuda_asymmetric_arguments(self):
+        cv = _import_cvcuda()
+        image = torch.full((3, 7, 9), 37, dtype=torch.uint8)
+        input = F.to_cvcuda_tensor(image)
+        with mock.patch.object(cv, "gaussian", wraps=cv.gaussian) as spy:
+            actual = F.gaussian_blur(input, kernel_size=(3, 5), sigma=(0.5, 1.5))
+        assert spy.call_args.args == (input, (3, 5), (0.5, 1.5))
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), image, rtol=0, atol=0)
+        actual = check_transform(transforms.GaussianBlur(kernel_size=(3, 5), sigma=(0.5, 1.5)), input)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), image, rtol=0, atol=0)
+
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_functional(self, make_input):
         check_functional(F.gaussian_blur, make_input(), kernel_size=(3, 3))
@@ -4004,9 +4017,14 @@ class TestGaussianBlur:
             (F._misc._gaussian_blur_image_pil, PIL.Image.Image),
             (F.gaussian_blur_image, tv_tensors.Image),
             (F.gaussian_blur_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.gaussian_blur, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.gaussian_blur
         check_functional_kernel_signature_match(F.gaussian_blur, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -4074,7 +4092,7 @@ class TestGaussianBlur:
             ((1, 26, 28), (23, 23), 1.7),
         ],
     )
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.float16])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32, torch.float64, torch.float16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     def test_functional_image_correctness(self, dimensions, kernel_size, sigma, dtype, device):
         if dtype is torch.float16 and device == "cpu":
