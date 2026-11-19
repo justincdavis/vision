@@ -229,30 +229,44 @@ def check_functional(functional, input, *args, check_scripted_smoke=True, **kwar
 
 
 def check_functional_kernel_signature_match(functional, *, kernel, input_type):
-    """Checks if the signature of the functional matches the kernel signature."""
+    """Select the signature check for the kernel's backend."""
+    if _is_cvcuda_available() and input_type is _import_cvcuda().Tensor:
+        _check_cvcuda_kernel_signature_match(functional, kernel=kernel)
+    else:
+        _check_native_kernel_signature_match(functional, kernel=kernel, input_type=input_type)
+
+
+def _check_cvcuda_kernel_signature_match(functional, *, kernel):
+    """Compare public arguments without CV-CUDA's stream and Gaussian noise seed controls."""
     functional_params = list(inspect.signature(functional).parameters.values())[1:]
     kernel_params = list(inspect.signature(kernel).parameters.values())[1:]
-    if _is_cvcuda_available() and input_type is _import_cvcuda().Tensor:
-        stream = kernel_params.pop()
-        assert stream.name == "stream" and stream.kind is inspect.Parameter.KEYWORD_ONLY and stream.default is None
-        if functional is F.gaussian_noise:
-            seed = kernel_params.pop()
-            assert seed.name == "seed" and seed.kind is inspect.Parameter.KEYWORD_ONLY and seed.default is None
 
-        def normalize(param):
-            from enum import Enum
+    stream = kernel_params.pop()
+    assert stream.name == "stream" and stream.kind is inspect.Parameter.KEYWORD_ONLY and stream.default is None
+    if functional is F.gaussian_noise:
+        seed = kernel_params.pop()
+        assert seed.name == "seed" and seed.kind is inspect.Parameter.KEYWORD_ONLY and seed.default is None
 
-            default = param.default
-            if isinstance(default, Enum):
-                default = default.value
-            elif isinstance(default, torch.dtype):
-                default = str(default).removeprefix("torch.")
-            elif isinstance(default, type) and issubclass(default, np.generic):
-                default = np.dtype(default).name
-            return param.replace(annotation=inspect.Parameter.empty, default=default)
+    def normalize_parameter(param):
+        from enum import Enum
 
-        assert list(map(normalize, functional_params)) == list(map(normalize, kernel_params))
-        return
+        # Backend annotations and representations of equivalent defaults differ.
+        default = param.default
+        if isinstance(default, Enum):
+            default = default.value
+        elif isinstance(default, torch.dtype):
+            default = str(default).removeprefix("torch.")
+        elif isinstance(default, type) and issubclass(default, np.generic):
+            default = np.dtype(default).name
+        return param.replace(annotation=inspect.Parameter.empty, default=default)
+
+    assert list(map(normalize_parameter, functional_params)) == list(map(normalize_parameter, kernel_params))
+
+
+def _check_native_kernel_signature_match(functional, *, kernel, input_type):
+    """Checks if the signature of the functional matches the native kernel signature."""
+    functional_params = list(inspect.signature(functional).parameters.values())[1:]
+    kernel_params = list(inspect.signature(kernel).parameters.values())[1:]
 
     if issubclass(input_type, tv_tensors.TVTensor):
         # We filter out metadata that is implicitly passed to the functional through the input tv_tensor, but has to be
