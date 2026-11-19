@@ -478,20 +478,80 @@ functionals
 CV-CUDA backend
 ^^^^^^^^^^^^^^^
 
-CV-CUDA >= 0.19.0 is an optional dependency. Opt in explicitly by wrapping
-CHW or NCHW Torch images with :func:`v2.functional.to_cvcuda_tensor` or
-the equivalent :class:`v2.ToCVCUDATensor` transform. Contiguous CUDA inputs share
-storage; CPU inputs are uploaded and non-contiguous inputs are copied. Values,
-dtype, shape and CUDA device are preserved; no channel permutation or value
-scaling is performed.
-CV-CUDA operations do not support autograd: detach inputs explicitly if needed.
+CV-CUDA >= 0.19.0 is an optional dependency. Like the PIL backend, it is
+selected by the input type: v2 functionals dispatch ``cvcuda.Tensor`` inputs
+to explicitly registered CV-CUDA kernels. Ordinary Torch tensors continue
+to use native TorchVision kernels, even when CV-CUDA is installed. There is
+no automatic conversion or fallback to another backend for an unsupported
+CV-CUDA functional.
 
-Only ``cvcuda.Tensor`` inputs dispatch to ``cvcuda.tv``. Ordinary Torch tensors
-continue to use native TorchVision kernels, even when CV-CUDA is installed.
-Horizontal and vertical flips are supported. Other operations require their
-own CV-CUDA kernel registration. Convert back with :class:`v2.CVCUDAToTensor`.
-Registered operations run on PyTorch's current stream for the input's device;
-if producing inputs on another stream, synchronize it before use.
+Opt in by converting CHW or NCHW Torch images with
+:func:`v2.functional.to_cvcuda_tensor` or the equivalent
+:class:`v2.ToCVCUDATensor` transform. The converter always interprets rank-3
+inputs as CHW and rank-4 inputs as NCHW; it does not infer layouts or accept
+a layout override. Contiguous CUDA inputs share storage when the device is
+unchanged; CPU inputs are uploaded and non-contiguous inputs are copied.
+Values, dtype and shape are preserved, with no channel permutation or value
+scaling. CUDA inputs keep their device unless a target ``device`` is
+specified. CV-CUDA operations do not support autograd: detach inputs
+explicitly if needed. Convert back with
+:func:`v2.functional.cvcuda_to_tensor` or :class:`v2.CVCUDAToTensor`.
+
+Direct ``cvcuda.Tensor`` inputs use their declared layout metadata: the
+backend accepts CHW, HWC, NCHW and NHWC, subject to each released
+``cvcuda.tv`` function's dtype, channel and parameter restrictions.
+Converting back to Torch preserves the image's shape, dtype, values and
+CUDA device without permuting channels: an HWC or NHWC CV-CUDA image
+remains HWC or NHWC in Torch. Native TorchVision image kernels expect
+trailing CHW dimensions, so permute such Torch outputs explicitly before
+passing them to native image transforms. Reverse conversion also accepts
+non-image CV-CUDA tensors. The CV-CUDA image backend is not a strict
+superset of native TorchVision image semantics, which can also support
+arbitrary leading dimensions before CHW.
+
+Released functions and TorchVision bindings
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All 33 image functions exported by ``cvcuda.tv`` 0.19.0 are registered for
+:mod:`torchvision.transforms.v2.functional` in the CV-CUDA backend. Ordinary
+Torch inputs retain their native kernels. Registration does not imply
+identical numeric results or identical argument support across backends;
+each CV-CUDA function's dtype, channel and parameter restrictions apply.
+
+.. list-table:: Supported ``cvcuda.tv`` 0.19.0 image functions
+    :header-rows: 1
+    :widths: 15 85
+
+    * - Family
+      - Functions
+    * - Geometry
+      - ``affine``, ``center_crop``, ``crop``, ``elastic``, ``five_crop``,
+        ``horizontal_flip``, ``pad``, ``perspective``, ``resize``,
+        ``resized_crop``, ``rotate``, ``ten_crop``, ``vertical_flip``
+    * - Color
+      - ``adjust_brightness``, ``adjust_contrast``, ``adjust_gamma``,
+        ``adjust_hue``, ``adjust_saturation``, ``adjust_sharpness``,
+        ``autocontrast``, ``equalize``, ``grayscale_to_rgb``, ``invert``,
+        ``permute_channels``, ``posterize``, ``rgb_to_grayscale``, ``solarize``
+    * - Augmentation
+      - ``erase``, ``jpeg``
+    * - Miscellaneous
+      - ``gaussian_blur``, ``gaussian_noise``, ``normalize``, ``to_dtype``
+
+``cvcuda.tv`` also exports a ``Compose`` class for its own pipeline API;
+it is distinct from :class:`v2.Compose` and is not an additional
+image-functional registration.
+
+``cvcuda.tv.jpeg`` is a JPEG compression-artifact augmentation, not a file
+encoder or decoder. It calls ``cvcuda.jpeg_compression_distortion`` and
+returns an image tensor rather than encoded JPEG bytes. Its inputs are
+uint8 images with one or three channels in CHW, HWC, NCHW or NHWC layout,
+with integer quality from 1 (strongest distortion) to 100 (weakest). The
+CV-CUDA kernel for :func:`v2.functional.jpeg` uses this simulation; it does
+not provide JPEG file encoding or decoding.
+
+Registered operations run on PyTorch's current stream for the input's
+device; if producing inputs on another stream, synchronize it before use.
 
 .. code-block:: python
 
