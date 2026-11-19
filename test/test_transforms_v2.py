@@ -3429,6 +3429,7 @@ class TestElastic:
         if kernel == "cvcuda":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.elastic, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.elastic
         check_functional_kernel_signature_match(F.elastic, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -3441,7 +3442,6 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
-            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_displacement_error(self, make_input):
@@ -3482,17 +3482,35 @@ class TestElastic:
         )
 
     @pytest.mark.needs_cvcuda
-    @needs_cuda
-    @pytest.mark.parametrize("interpolation", [transforms.InterpolationMode.NEAREST, transforms.InterpolationMode.BILINEAR])
-    def test_image_cvcuda_correctness(self, interpolation):
-        image = make_image_cvcuda(dtype=torch.uint8)
-        displacement = self._make_displacement(image)
-        result = F.cvcuda_to_tensor(F.elastic(image, displacement=displacement, interpolation=interpolation))
-        expected = F.elastic_image(F.cvcuda_to_tensor(image), displacement=displacement, interpolation=interpolation)
-        assert_close(result, expected, atol=get_max_value(torch.uint8), rtol=0)
-        mae = (expected.float() - result.float()).abs().mean()
-        mae_threshold = 30.0 if interpolation is transforms.InterpolationMode.NEAREST else 20.0
-        assert mae < mae_threshold, f"MAE {mae} exceeds threshold"
+    def test_displacement_shape_error_cvcuda(self):
+        image = make_image_cvcuda()
+        with pytest.raises(ValueError, match="displacement shape should be"):
+            F.elastic(image, displacement=torch.rand(F.get_size(image)))
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        displacement=[0, 0.1],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        displacement = self._make_displacement(image) * 0.1
+        kwargs = dict(displacement=displacement)
+        if param == "displacement":
+            kwargs[param] = torch.full_like(displacement, value)
+        elif param == "fill":
+            kwargs[param] = adapt_fill(value, dtype=dtype)
+        else:
+            kwargs[param] = value
+        actual = F.elastic(image, **kwargs)
+        expected = _import_cvcuda().tv.elastic(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "displacement" and value == 0:
+            assert_equal(actual, image)
 
 
 class TestToPureTensor:

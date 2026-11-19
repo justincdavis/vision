@@ -2310,10 +2310,6 @@ def elastic(
     return kernel(inpt, displacement=displacement, interpolation=interpolation, fill=fill)
 
 
-if _is_cvcuda_available():
-    _register_cvcuda_kernel(elastic, _import_cvcuda().tv.elastic)
-
-
 elastic_transform = elastic
 
 
