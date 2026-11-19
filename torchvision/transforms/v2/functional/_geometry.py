@@ -651,10 +651,6 @@ def affine(
     )
 
 
-if _is_cvcuda_available():
-    _register_cvcuda_kernel(affine, _import_cvcuda().tv.affine)
-
-
 def _affine_parse_args(
     angle: Union[int, float],
     translate: list[float],
