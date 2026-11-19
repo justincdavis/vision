@@ -2174,6 +2174,7 @@ class TestRotate:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -2188,9 +2189,14 @@ class TestRotate:
             (F.rotate_mask, tv_tensors.Mask),
             (F.rotate_video, tv_tensors.Video),
             (F.rotate_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.rotate, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.rotate
         check_functional_kernel_signature_match(F.rotate, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -2203,6 +2209,7 @@ class TestRotate:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2210,6 +2217,29 @@ class TestRotate:
         check_transform(
             transforms.RandomRotation(**self._CORRECTNESS_TRANSFORM_AFFINE_RANGES), make_input(device=device)
         )
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        angle=[0, 17],
+        center=[None, [3, 4]],
+        expand=[False, True],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        if param == "fill":
+            value = adapt_fill(value, dtype=dtype)
+        kwargs = dict(angle=17)
+        kwargs[param] = value
+        actual = F.rotate(image, **kwargs)
+        expected = _import_cvcuda().tv.rotate(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "angle" and value == 0:
+            assert_equal(actual, image)
 
     @pytest.mark.parametrize("angle", _CORRECTNESS_AFFINE_KWARGS["angle"])
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
