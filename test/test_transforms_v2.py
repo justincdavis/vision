@@ -6399,9 +6399,10 @@ class TestAdjustSaturation:
         with pytest.raises(ValueError, match="is not non-negative"):
             F.adjust_saturation(make_image(), saturation_factor=-1)
 
+    @pytest.mark.parametrize("color_space", ["RGB", "GRAY"])
     @pytest.mark.parametrize("saturation_factor", [0.1, 0.5, 1.0])
-    def test_correctness_image(self, saturation_factor):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, color_space, saturation_factor):
+        image = make_image(dtype=torch.uint8, color_space=color_space, device="cpu")
 
         actual = F.adjust_saturation(image, saturation_factor=saturation_factor)
         expected = F.to_image(F.adjust_saturation(F.to_pil_image(image), saturation_factor=saturation_factor))
