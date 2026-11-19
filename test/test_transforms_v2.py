@@ -5683,7 +5683,8 @@ class TestNormalize:
     def test_kernel_video(self):
         check_kernel(F.normalize_video, make_video(dtype=torch.float32), mean=self.MEAN, std=self.STD)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video])
+    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video,
+        pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
     def test_functional(self, make_input):
         check_functional(F.normalize, make_input(dtype=torch.float32), mean=self.MEAN, std=self.STD)
 
@@ -5693,9 +5694,14 @@ class TestNormalize:
             (F.normalize_image, torch.Tensor),
             (F.normalize_image, tv_tensors.Image),
             (F.normalize_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.normalize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.normalize
         check_functional_kernel_signature_match(F.normalize, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -5709,6 +5715,13 @@ class TestNormalize:
             with pytest.raises(ValueError, match="std evaluated to zero, leading to division by zero"):
                 F.normalize_image(make_image(dtype=torch.float32), mean=self.MEAN, std=std)
 
+    @pytest.mark.needs_cvcuda
+    def test_functional_error_cvcuda(self):
+        with pytest.raises(TypeError, match="Input tensor should be a float tensor"):
+            F.normalize(make_image_cvcuda(dtype=torch.uint8), mean=self.MEAN, std=self.STD)
+        with pytest.raises(ValueError, match="std evaluated to zero"):
+            F.normalize(make_image_cvcuda(dtype=torch.float32), mean=self.MEAN, std=[1, 0, 1])
+
     def _sample_input_adapter(self, transform, input, device):
         adapted_input = {}
         for key, value in input.items():
@@ -5721,7 +5734,8 @@ class TestNormalize:
             adapted_input[key] = value
         return adapted_input
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video])
+    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video,
+        pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
     def test_transform(self, make_input):
         check_transform(
             transforms.Normalize(mean=self.MEAN, std=self.STD),
@@ -5744,6 +5758,20 @@ class TestNormalize:
         expected = self._reference_normalize_image(image, mean=mean, std=std)
 
         assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("inplace", [False, True])
+    @pytest.mark.parametrize("mean,std", [(0.5, 2.0), ([0.5, 1.0, 1.5], [2.0, 4.0, 8.0])])
+    def test_cvcuda_mean_std_inplace(self, mean, std, inplace):
+        image = torch.full((3, 4, 5), 2.5, dtype=torch.float32)
+        input = F.to_cvcuda_tensor(image)
+        actual = F.normalize(input, mean=mean, std=std, inplace=inplace)
+        assert (actual is input) == inplace
+        expected = (image - torch.tensor(mean).reshape(-1, 1, 1)) / torch.tensor(std).reshape(-1, 1, 1)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=0)
+        torch.testing.assert_close(
+            F.cvcuda_to_tensor(input).cpu(), expected if inplace else image, rtol=0, atol=0
+        )
 
 
 class TestClampBoundingBoxes:
