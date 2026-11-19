@@ -1340,6 +1340,7 @@ class TestHorizontalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
@@ -1355,6 +1356,7 @@ class TestHorizontalFlip:
             (F.horizontal_flip_image, torch.Tensor),
             (F._geometry._horizontal_flip_image_pil, PIL.Image.Image),
             (F.horizontal_flip_image, tv_tensors.Image),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
             (F.horizontal_flip_bounding_boxes, tv_tensors.BoundingBoxes),
             (F.horizontal_flip_mask, tv_tensors.Mask),
             (F.horizontal_flip_video, tv_tensors.Video),
@@ -1362,6 +1364,9 @@ class TestHorizontalFlip:
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.horizontal_flip, input_type)
         check_functional_kernel_signature_match(F.horizontal_flip, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -1370,6 +1375,7 @@ class TestHorizontalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
@@ -1383,13 +1389,20 @@ class TestHorizontalFlip:
     @pytest.mark.parametrize(
         "fn", [F.horizontal_flip, transform_cls_to_functional(transforms.RandomHorizontalFlip, p=1)]
     )
-    def test_image_correctness(self, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
+    def test_image_correctness(self, fn, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = fn(image)
-        expected = F.to_image(F.horizontal_flip(F.to_pil_image(image)))
+        reference = F.cvcuda_to_tensor(image).cpu() if make_input is make_image_cvcuda else image
+        expected = F.to_image(F.horizontal_flip(F.to_pil_image(reference)))
 
-        torch.testing.assert_close(actual, expected)
+        if make_input is make_image_cvcuda:
+            assert_equal(actual, expected)
+        else:
+            torch.testing.assert_close(actual, expected)
 
     def _reference_horizontal_flip_bounding_boxes(self, bounding_boxes: tv_tensors.BoundingBoxes):
         affine_matrix = np.array(
@@ -1445,6 +1458,7 @@ class TestHorizontalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
@@ -1952,6 +1966,7 @@ class TestVerticalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
@@ -1967,6 +1982,7 @@ class TestVerticalFlip:
             (F.vertical_flip_image, torch.Tensor),
             (F._geometry._vertical_flip_image_pil, PIL.Image.Image),
             (F.vertical_flip_image, tv_tensors.Image),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
             (F.vertical_flip_bounding_boxes, tv_tensors.BoundingBoxes),
             (F.vertical_flip_mask, tv_tensors.Mask),
             (F.vertical_flip_video, tv_tensors.Video),
@@ -1974,6 +1990,9 @@ class TestVerticalFlip:
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.vertical_flip, input_type)
         check_functional_kernel_signature_match(F.vertical_flip, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -1982,6 +2001,7 @@ class TestVerticalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
@@ -1993,13 +2013,20 @@ class TestVerticalFlip:
         check_transform(transforms.RandomVerticalFlip(p=1), make_input(device=device))
 
     @pytest.mark.parametrize("fn", [F.vertical_flip, transform_cls_to_functional(transforms.RandomVerticalFlip, p=1)])
-    def test_image_correctness(self, fn):
-        image = make_image(dtype=torch.uint8, device="cpu")
+    @pytest.mark.parametrize(
+        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    )
+    def test_image_correctness(self, fn, make_input):
+        image = make_input(dtype=torch.uint8, device="cpu")
 
         actual = fn(image)
-        expected = F.to_image(F.vertical_flip(F.to_pil_image(image)))
+        reference = F.cvcuda_to_tensor(image).cpu() if make_input is make_image_cvcuda else image
+        expected = F.to_image(F.vertical_flip(F.to_pil_image(reference)))
 
-        torch.testing.assert_close(actual, expected)
+        if make_input is make_image_cvcuda:
+            assert_equal(actual, expected)
+        else:
+            torch.testing.assert_close(actual, expected)
 
     def _reference_vertical_flip_bounding_boxes(self, bounding_boxes: tv_tensors.BoundingBoxes):
         affine_matrix = np.array(
@@ -2051,6 +2078,7 @@ class TestVerticalFlip:
             make_image_tensor,
             make_image_pil,
             make_image,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
             make_bounding_boxes,
             make_segmentation_mask,
             make_video,
