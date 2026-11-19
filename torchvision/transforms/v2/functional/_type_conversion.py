@@ -7,7 +7,7 @@ import torch
 from torchvision import tv_tensors
 from torchvision.transforms import functional as _F
 
-from ._cvcuda import _import_cvcuda, _validate_cvcuda_image
+from ._cvcuda import _import_cvcuda
 
 
 @torch.jit.unused
@@ -30,15 +30,6 @@ to_pil_image = _F.to_pil_image
 pil_to_tensor = _F.pil_to_tensor
 
 
-def _validate_cvcuda_input(inpt):
-    if not isinstance(inpt, torch.Tensor):
-        raise TypeError(f"Input must be a torch.Tensor, got {type(inpt)}.")
-    if inpt.ndim not in (3, 4):
-        raise ValueError("Input must have CHW or NCHW shape (rank 3 or 4).")
-    if inpt.requires_grad:
-        raise ValueError("CV-CUDA does not support autograd. Detach the input explicitly.")
-
-
 @torch.jit.unused
 def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
     """Convert a CHW/NCHW Torch tensor to CV-CUDA without scaling or permuting values.
@@ -46,7 +37,12 @@ def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
     CPU inputs move to the current CUDA device; CUDA inputs keep their device unless
     ``device`` is specified. Non-contiguous inputs are copied. Otherwise storage is shared.
     """
-    _validate_cvcuda_input(inpt)
+    if not isinstance(inpt, torch.Tensor):
+        raise TypeError(f"Input must be a torch.Tensor, got {type(inpt)}.")
+    if inpt.ndim not in (3, 4):
+        raise ValueError("Input must have CHW or NCHW shape (rank 3 or 4).")
+    if inpt.requires_grad:
+        raise ValueError("CV-CUDA does not support autograd. Detach the input explicitly.")
     cvcuda = _import_cvcuda()
     device = torch.device(device) if device is not None else (inpt.device if inpt.is_cuda else torch.device("cuda"))
     if device.type != "cuda":
@@ -61,12 +57,12 @@ def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
 
 @torch.jit.unused
 def cvcuda_to_tensor(inpt) -> torch.Tensor:
-    """Return a zero-copy CUDA Torch tensor, preserving CHW/NCHW layout and device."""
+    """Return a zero-copy CUDA Torch tensor, preserving shape, dtype, and device."""
     cvcuda = _import_cvcuda()
     if not isinstance(inpt, cvcuda.Tensor):
         raise TypeError(f"Input must be a cvcuda.Tensor, got {type(inpt)}.")
-    _validate_cvcuda_image(inpt)
     buffer = inpt.cuda()
+    # ExternalBuffer exports storage through CAI; DLPack only supplies its device here.
     device = torch.device("cuda", buffer.__dlpack_device__()[1])
     with torch.cuda.device(device):
         return torch.as_tensor(buffer, device=device)
