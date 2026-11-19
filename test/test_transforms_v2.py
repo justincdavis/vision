@@ -6118,7 +6118,11 @@ class TestAdjustSharpness:
     def test_kernel_video(self):
         check_kernel(F.adjust_sharpness_video, make_video(), sharpness_factor=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_sharpness, make_input(), sharpness_factor=0.5)
 
@@ -6129,12 +6133,21 @@ class TestAdjustSharpness:
             (F._color._adjust_sharpness_image_pil, PIL.Image.Image),
             (F.adjust_sharpness_image, tv_tensors.Image),
             (F.adjust_sharpness_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_sharpness, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.adjust_sharpness
         check_functional_kernel_signature_match(F.adjust_sharpness, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomAdjustSharpness(sharpness_factor=0.5, p=1), make_input())
 
@@ -6155,6 +6168,15 @@ class TestAdjustSharpness:
         actual = fn(image, sharpness_factor=sharpness_factor)
         expected = F.to_image(F.adjust_sharpness(F.to_pil_image(image), sharpness_factor=sharpness_factor))
 
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("p", [0, 1])
+    def test_cvcuda_correctness(self, p):
+        image = torch.zeros((3, 5, 7), dtype=torch.uint8)
+        image[:, 2, 3] = 130
+        actual = transforms.RandomAdjustSharpness(sharpness_factor=0, p=p)(F.to_cvcuda_tensor(image))
+        expected = F.adjust_sharpness(image, sharpness_factor=0) if p else image
         assert_equal(actual, expected)
 
 
