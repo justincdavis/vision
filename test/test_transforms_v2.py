@@ -5977,7 +5977,16 @@ class TestPosterize:
     def test_kernel_video(self):
         check_kernel(F.posterize_video, make_video(), bits=1)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.posterize, make_input(), bits=1)
 
@@ -5988,14 +5997,35 @@ class TestPosterize:
             (F._color._posterize_image_pil, PIL.Image.Image),
             (F.posterize_image, tv_tensors.Image),
             (F.posterize_video, tv_tensors.Video),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.posterize, input_type)
         check_functional_kernel_signature_match(F.posterize, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomPosterize(bits=1, p=1), make_input())
+
+    @needs_cvcuda
+    def test_cvcuda_dispatch(self):
+        image = make_image_cvcuda(batch_dims=(2,))
+        reference = F.cvcuda_to_tensor(image).cpu()
+        actual = F.posterize(image, bits=4)
+        expected = F.posterize(reference, bits=4)
+        assert_equal(actual, expected)
 
     @pytest.mark.parametrize("bits", [1, 4, 8])
     @pytest.mark.parametrize("fn", [F.posterize, transform_cls_to_functional(transforms.RandomPosterize, p=1)])
