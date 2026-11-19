@@ -5729,6 +5729,7 @@ class TestNormalize:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.normalize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.normalize
         check_functional_kernel_signature_match(F.normalize, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -5744,8 +5745,10 @@ class TestNormalize:
 
     @pytest.mark.needs_cvcuda
     def test_functional_error_cvcuda(self):
-        with pytest.raises(ValueError, match="Input tensor should be a float tensor"):
+        with pytest.raises(TypeError, match="Input tensor should be a float tensor"):
             F.normalize(make_image_cvcuda(dtype=torch.uint8), mean=self.MEAN, std=self.STD)
+        with pytest.raises(ValueError, match="std evaluated to zero"):
+            F.normalize(make_image_cvcuda(dtype=torch.float32), mean=self.MEAN, std=[1, 0, 1])
 
     def _sample_input_adapter(self, transform, input, device):
         adapted_input = {}
@@ -5775,19 +5778,28 @@ class TestNormalize:
 
     @pytest.mark.parametrize(("mean", "std"), MEANS_STDS)
     @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
-    @pytest.mark.parametrize("make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
     @pytest.mark.parametrize("fn", [F.normalize, transform_cls_to_functional(transforms.Normalize)])
-    def test_correctness_image(self, mean, std, dtype, make_input, fn):
-        image = make_input(dtype=dtype)
+    def test_correctness_image(self, mean, std, dtype, fn):
+        image = make_image(dtype=dtype)
+
         actual = fn(image, mean=mean, std=std)
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
-            actual = F.cvcuda_to_tensor(actual)[0].cpu()
         expected = self._reference_normalize_image(image, mean=mean, std=std)
-        if make_input is make_image_cvcuda:
-            assert_close(actual, expected)
-        else:
-            assert_equal(actual, expected)
+
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("inplace", [False, True])
+    @pytest.mark.parametrize("mean,std", [(0.5, 2.0), ([0.5, 1.0, 1.5], [2.0, 4.0, 8.0])])
+    def test_cvcuda_mean_std_inplace(self, mean, std, inplace):
+        image = torch.full((3, 4, 5), 2.5, dtype=torch.float32)
+        input = F.to_cvcuda_tensor(image)
+        actual = F.normalize(input, mean=mean, std=std, inplace=inplace)
+        assert (actual is input) == inplace
+        expected = (image - torch.tensor(mean).reshape(-1, 1, 1)) / torch.tensor(std).reshape(-1, 1, 1)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=0)
+        torch.testing.assert_close(
+            F.cvcuda_to_tensor(input).cpu(), expected if inplace else image, rtol=0, atol=0
+        )
 
 
 class TestClampBoundingBoxes:
