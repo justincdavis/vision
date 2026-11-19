@@ -3849,7 +3849,8 @@ class TestErase:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_functional(self, make_input):
         check_functional(F.erase, make_input(), **self.FUNCTIONAL_KWARGS)
@@ -3861,25 +3862,34 @@ class TestErase:
             (F._augment._erase_image_pil, PIL.Image.Image),
             (F.erase_image, tv_tensors.Image),
             (F.erase_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.erase, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.erase
         check_functional_kernel_signature_match(F.erase, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
     def test_transform(self, make_input, device):
         input = make_input(device=device)
 
-        with pytest.warns(UserWarning, match="currently passing through inputs of type"):
-            check_transform(
-                transforms.RandomErasing(p=1),
-                input,
-                check_v1_compatibility=not isinstance(input, PIL.Image.Image),
-            )
+        if make_input is make_image_cvcuda:
+            check_transform(transforms.RandomErasing(p=1), input, check_v1_compatibility=False)
+        else:
+            with pytest.warns(UserWarning, match="currently passing through inputs of type"):
+                check_transform(
+                    transforms.RandomErasing(p=1),
+                    input,
+                    check_v1_compatibility=not isinstance(input, PIL.Image.Image),
+                )
 
     def _reference_erase_image(self, image, *, i, j, h, w, v):
         mask = torch.zeros_like(image, dtype=torch.bool)
@@ -3933,6 +3943,37 @@ class TestErase:
         expected = self._reference_erase_image(image, **params)
 
         assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_cvcuda_functional_correctness(self, inplace):
+        image = torch.arange(3 * 5 * 7, dtype=torch.uint8).reshape(3, 5, 7)
+        cv_image = F.to_cvcuda_tensor(image)
+        kwargs = dict(i=1, j=2, h=2, w=3, v=torch.tensor([2, 4, 6]).reshape(3, 1, 1))
+        actual = F.erase(cv_image, **kwargs, inplace=inplace)
+        expected = self._reference_erase_image(image, **kwargs)
+        assert_equal(actual, expected)
+        if inplace:
+            assert actual is cv_image
+        else:
+            assert actual is not cv_image
+            assert_equal(cv_image, image)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("value", [(0, 1, 0), "random"])
+    def test_cvcuda_transform_correctness(self, value):
+        image = make_image(dtype=torch.uint8)
+        cv_image = F.to_cvcuda_tensor(image)
+        transform = transforms.RandomErasing(p=1, scale=(0.1, 0.2), ratio=(0.3, 0.7), value=value)
+        with freeze_rng_state():
+            torch.manual_seed(0)
+            torch.rand(1)
+            params = transform.make_params([cv_image])
+            torch.manual_seed(0)
+            actual = transform(cv_image)
+        expected = self._reference_erase_image(image, **params)
+        assert_equal(actual, expected)
+        assert_equal(transforms.RandomErasing(p=0)(cv_image), image)
 
     def test_transform_errors(self):
         with pytest.raises(TypeError, match="Argument value should be either a number or str or a sequence"):
