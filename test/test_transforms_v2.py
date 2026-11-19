@@ -8242,3 +8242,37 @@ class TestUtils:
     def test_no_valid_input(self, query):
         with pytest.raises(TypeError, match="No image"):
             query(["blah"])
+
+
+@pytest.mark.needs_cvcuda
+class TestCVCUDASharedStream:
+    def test_shared_stream(self, monkeypatch):
+        from torchvision.transforms.v2.functional._cvcuda import _register_cvcuda_kernel
+        from torchvision.transforms.v2.functional._utils import _KERNEL_REGISTRY
+
+        torch_stream = torch.cuda.Stream()
+        received = []
+
+        def functional(image):
+            return _get_kernel(functional, type(image))(image)
+
+        def kernel(image, *, stream):
+            received.append(stream.handle)
+            assert stream.handle == torch_stream.cuda_stream
+            return image
+
+        monkeypatch.setitem(_KERNEL_REGISTRY, functional, {})
+        _register_cvcuda_kernel(functional, kernel)
+        with torch.cuda.stream(torch_stream):
+            functional(make_image_cvcuda())
+        assert received == [torch_stream.cuda_stream]
+
+    def test_shared_stream_negative(self):
+        cvcuda = _import_cvcuda()
+        torch_stream = torch.cuda.Stream()
+
+        def kernel(*, stream):
+            assert stream.handle != torch_stream.cuda_stream
+
+        with torch.cuda.stream(torch_stream):
+            kernel(stream=cvcuda.Stream.current)
