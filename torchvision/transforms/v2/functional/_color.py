@@ -7,7 +7,6 @@ from torchvision.transforms._functional_tensor import _max_value
 
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _import_cvcuda, _is_cvcuda_available, _register_cvcuda_kernel
 from ._misc import _num_value_bits, to_dtype_image
 from ._type_conversion import pil_to_tensor, to_pil_image
 from ._utils import _get_kernel, _register_kernel_internal
@@ -739,8 +738,3 @@ def _permute_channels_image_pil(image: PIL.Image.Image, permutation: list[int]) 
 @_register_kernel_internal(permute_channels, tv_tensors.Video)
 def permute_channels_video(video: torch.Tensor, permutation: list[int]) -> torch.Tensor:
     return permute_channels_image(video, permutation=permutation)
-
-
-if _is_cvcuda_available():
-    _register_cvcuda_kernel(rgb_to_grayscale, _import_cvcuda().tv.rgb_to_grayscale)
-    _register_cvcuda_kernel(grayscale_to_rgb, _import_cvcuda().tv.grayscale_to_rgb)
