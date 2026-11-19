@@ -5284,6 +5284,7 @@ class TestPerspective:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -5299,9 +5300,14 @@ class TestPerspective:
             (F.perspective_mask, tv_tensors.Mask),
             (F.perspective_video, tv_tensors.Video),
             (F.perspective_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.perspective, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.perspective
         check_functional_kernel_signature_match(F.perspective, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("distortion_scale", [0.5, 0.0, 1.0])
@@ -5315,6 +5321,7 @@ class TestPerspective:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_transform(self, distortion_scale, make_input):
@@ -5324,6 +5331,31 @@ class TestPerspective:
     def test_transform_error(self, distortion_scale):
         with pytest.raises(ValueError, match="distortion_scale value should be between 0 and 1"):
             transforms.RandomPerspective(distortion_scale=distortion_scale)
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        coefficients=[[1, 0, 0, 0, 1, 0, 0, 0], COEFFICIENTS[0]],
+        start_end_points=[START_END_POINTS[0]],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        kwargs = dict(self.MINIMAL_KWARGS)
+        if param == "start_end_points":
+            kwargs = dict(zip(["startpoints", "endpoints"], value))
+        else:
+            if param == "fill":
+                value = adapt_fill(value, dtype=dtype)
+            kwargs[param] = value
+        actual = F.perspective(image, **kwargs)
+        expected = _import_cvcuda().tv.perspective(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "coefficients" and value == [1, 0, 0, 0, 1, 0, 0, 0]:
+            assert_equal(actual, image)
 
     @pytest.mark.parametrize("coefficients", COEFFICIENTS)
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
