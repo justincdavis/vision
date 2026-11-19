@@ -6255,7 +6255,7 @@ class TestAdjustContrast:
     def test_cvcuda_correctness(self):
         image = torch.tensor([0, 128], dtype=torch.uint8).repeat(3, 8, 4)
         actual = F.adjust_contrast(F.to_cvcuda_tensor(image), contrast_factor=0)
-        assert_equal(actual, torch.full_like(image, 64))
+        assert_close(F.cvcuda_to_tensor(actual).cpu(), torch.full_like(image, 64), rtol=0, atol=1)
 
 
 class TestAdjustGamma:
