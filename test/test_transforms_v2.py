@@ -4183,6 +4183,7 @@ class TestGaussianNoise:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.gaussian_noise, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.gaussian_noise
         check_functional_kernel_signature_match(F.gaussian_noise, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -4220,6 +4221,16 @@ class TestGaussianNoise:
             return input
 
         check_transform(transforms.GaussianNoise(), make_input(dtype=torch.uint8), check_sample_input=adapter)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("clip", [False, True])
+    def test_cvcuda_zero_sigma(self, clip):
+        image = torch.full((3, 4, 5), 0.75, dtype=torch.float32)
+        input = F.to_cvcuda_tensor(image)
+        actual = F.gaussian_noise(input, mean=0.5, sigma=0, clip=clip)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        expected = torch.full_like(image, 1.0 if clip else 1.25)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=0)
 
     def test_bad_input(self):
         with pytest.raises(ValueError, match="Gaussian Noise is not implemented for PIL images."):
