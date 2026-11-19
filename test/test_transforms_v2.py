@@ -6079,7 +6079,16 @@ class TestAutocontrast:
     def test_kernel_video(self):
         check_kernel(F.autocontrast_video, make_video())
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.autocontrast, make_input())
 
@@ -6089,13 +6098,26 @@ class TestAutocontrast:
             (F.autocontrast_image, torch.Tensor),
             (F._color._autocontrast_image_pil, PIL.Image.Image),
             (F.autocontrast_image, tv_tensors.Image),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
             (F.autocontrast_video, tv_tensors.Video),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.autocontrast, input_type)
         check_functional_kernel_signature_match(F.autocontrast, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomAutocontrast(p=1), make_input(), check_v1_compatibility=dict(rtol=0, atol=1))
 
@@ -6107,6 +6129,19 @@ class TestAutocontrast:
         expected = F.to_image(F.autocontrast(F.to_pil_image(image)))
 
         assert_close(actual, expected, rtol=0, atol=1)
+
+    @needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_integration(self, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        reference = F.cvcuda_to_tensor(image).cpu()
+
+        actual = transforms.RandomAutocontrast(p=1)(image)
+        expected = F.autocontrast(reference)
+
+        assert isinstance(actual, type(image))
+        assert actual.layout == image.layout
+        assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=0 if dtype.is_floating_point else 1)
 
 
 class TestAdjustSharpness:
