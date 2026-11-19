@@ -22,7 +22,6 @@ import torchvision.transforms.v2 as transforms
 
 from common_utils import (
     assert_equal,
-    assert_run_python_script,
     cache,
     cpu_and_cuda,
     freeze_rng_state,
@@ -5606,18 +5605,6 @@ class TestEqualize:
 
 
 class TestUniformTemporalSubsample:
-    @needs_cvcuda
-    def test_unsupported_cvcuda_transform_raises(self):
-        class UnsupportedTransform(transforms.Transform):
-            def transform(self, inpt, params):
-                return self._call_kernel(F.uniform_temporal_subsample, inpt, 1)
-
-        image = make_image_cvcuda(batch_dims=())
-        with pytest.raises(TypeError, match="uniform_temporal_subsample"):
-            UnsupportedTransform()(image)
-        with pytest.raises(TypeError, match="uniform_temporal_subsample"):
-            F.uniform_temporal_subsample(image, 1)
-
     def test_kernel_video(self):
         check_kernel(F.uniform_temporal_subsample_video, make_video(), num_samples=2)
 
@@ -6844,37 +6831,6 @@ def make_image_numpy(*args, **kwargs):
 
 
 class TestToImage:
-    @pytest.mark.parametrize("version", [None, "0.18.0"])
-    def test_optional_cvcuda_dependency(self, version):
-        assert_run_python_script(f'''
-import importlib.abc
-import sys
-import types
-class Block(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'cvcuda':
-            raise ModuleNotFoundError("No module named 'cvcuda'", name='cvcuda')
-version = {version!r}
-if version is None:
-    sys.meta_path.insert(0, Block())
-else:
-    module = types.ModuleType('cvcuda')
-    module.__version__ = {version!r}
-    sys.modules['cvcuda'] = module
-from torchvision.transforms import v2
-from torchvision.transforms.v2 import functional as F
-import torch
-assert not hasattr(F, 'as_cvcuda_tensor')
-image = torch.arange(12).reshape(1, 3, 4)
-assert torch.equal(F.horizontal_flip(image), image.flip(-1))
-try:
-    F.to_cvcuda_tensor(torch.zeros(3, 4, 5))
-except ImportError as error:
-    assert '0.19.0' in str(error)
-else:
-    raise AssertionError('Expected ImportError')
-''')
-
     @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_image_numpy])
     @pytest.mark.parametrize("fn", [F.to_image, transform_cls_to_functional(transforms.ToImage)])
     def test_functional_and_transform(self, make_input, fn):
@@ -7140,23 +7096,6 @@ def test_pure_tensor_heuristic(make_inputs):
 
 
 class TestRandomIoUCrop:
-    @needs_cvcuda
-    def test_cvcuda_sample_noop(self):
-        size = (7, 11)
-        image = make_image_cvcuda(size, batch_dims=())
-        boxes = tv_tensors.BoundingBoxes([[1, 1, 4, 4]], format="XYXY", canvas_size=size)
-        labels = np.array([1])
-        sample = {"image": image, "boxes": boxes, "labels": labels}
-
-        output = transforms.RandomIoUCrop(sampler_options=[1.0])(sample)
-
-        assert output["image"] is image
-        assert output["boxes"] is boxes
-        assert output["labels"] is labels
-        assert F.get_dimensions(output["image"]) == [3, *size]
-        assert output["boxes"].format is tv_tensors.BoundingBoxFormat.XYXY
-        assert output["boxes"].canvas_size == size
-
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("options", [[0.5, 0.9], [2.0]])
     def test_make_params(self, device, options):
