@@ -5307,6 +5307,7 @@ class TestPerspective:
         if kernel == "cvcuda":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.perspective, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.perspective
         check_functional_kernel_signature_match(F.perspective, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("distortion_scale", [0.5, 0.0, 1.0])
@@ -5331,21 +5332,40 @@ class TestPerspective:
         with pytest.raises(ValueError, match="distortion_scale value should be between 0 and 1"):
             transforms.RandomPerspective(distortion_scale=distortion_scale)
 
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        coefficients=[[1, 0, 0, 0, 1, 0, 0, 0], COEFFICIENTS[0]],
+        start_end_points=[START_END_POINTS[0]],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        kwargs = dict(self.MINIMAL_KWARGS)
+        if param == "start_end_points":
+            kwargs = dict(zip(["startpoints", "endpoints"], value))
+        else:
+            if param == "fill":
+                value = adapt_fill(value, dtype=dtype)
+            kwargs[param] = value
+        actual = F.perspective(image, **kwargs)
+        expected = _import_cvcuda().tv.perspective(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "coefficients" and value == [1, 0, 0, 0, 1, 0, 0, 0]:
+            assert_equal(actual, image)
+
     @pytest.mark.parametrize("coefficients", COEFFICIENTS)
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
-    @pytest.mark.parametrize(
-        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
-    )
-    def test_image_functional_correctness(self, coefficients, interpolation, fill, make_input):
-        image = make_input(dtype=torch.uint8, device="cpu")
+    def test_image_functional_correctness(self, coefficients, interpolation, fill):
+        image = make_image(dtype=torch.uint8, device="cpu")
 
         actual = F.perspective(
             image, startpoints=None, endpoints=None, coefficients=coefficients, interpolation=interpolation, fill=fill
         )
-        if make_input is make_image_cvcuda:
-            actual = F.cvcuda_to_tensor(actual)[0].cpu()
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(
             F.perspective(
                 F.to_pil_image(image),
@@ -5357,17 +5377,13 @@ class TestPerspective:
             )
         )
 
-        if make_input is make_image:
-            if interpolation == "bilinear":
-                abs_diff = (actual.float() - expected.float()).abs()
-                assert (abs_diff > 1).float().mean() < 7e-2
-                mae = abs_diff.mean()
-                assert mae < 3
-            else:
-                assert_equal(actual, expected)
+        if interpolation == "bilinear":
+            abs_diff = (actual.float() - expected.float()).abs()
+            assert (abs_diff > 1).float().mean() < 7e-2
+            mae = abs_diff.mean()
+            assert mae < 3
         else:
-            tolerance = 255 if interpolation == "nearest" else 125
-            assert_close(actual, expected, rtol=0, atol=tolerance)
+            assert_equal(actual, expected)
 
     def _reference_perspective_bounding_boxes(self, bounding_boxes, *, startpoints, endpoints):
         format = bounding_boxes.format
