@@ -4130,14 +4130,14 @@ class TestGaussianNoise:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_video],
+        [make_image_tensor, make_image, make_video, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_functional_float(self, make_input):
         check_functional(F.gaussian_noise, make_input(dtype=torch.float32))
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_video],
+        [make_image_tensor, make_image, make_video, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_functional_uint8(self, make_input):
         check_functional(F.gaussian_noise, make_input(dtype=torch.uint8))
@@ -4148,14 +4148,19 @@ class TestGaussianNoise:
             (F.gaussian_noise, torch.Tensor),
             (F.gaussian_noise_image, tv_tensors.Image),
             (F.gaussian_noise_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.gaussian_noise, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.gaussian_noise
         check_functional_kernel_signature_match(F.gaussian_noise, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_video],
+        [make_image_tensor, make_image, make_video, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_transform_float(self, make_input):
         def adapter(_, input, __):
@@ -4173,7 +4178,7 @@ class TestGaussianNoise:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_video],
+        [make_image_tensor, make_image, make_video, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_transform_uint8(self, make_input):
         def adapter(_, input, __):
@@ -4188,6 +4193,16 @@ class TestGaussianNoise:
             return input
 
         check_transform(transforms.GaussianNoise(), make_input(dtype=torch.uint8), check_sample_input=adapter)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("clip", [False, True])
+    def test_cvcuda_zero_sigma(self, clip):
+        image = torch.full((3, 4, 5), 0.75, dtype=torch.float32)
+        input = F.to_cvcuda_tensor(image)
+        actual = F.gaussian_noise(input, mean=0.5, sigma=0, clip=clip)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        expected = torch.full_like(image, 1.0 if clip else 1.25)
+        torch.testing.assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=0)
 
     def test_bad_input(self):
         with pytest.raises(ValueError, match="Gaussian Noise is not implemented for PIL images."):
