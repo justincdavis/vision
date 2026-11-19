@@ -6209,7 +6209,16 @@ class TestAdjustGamma:
     def test_kernel_video(self):
         check_kernel(F.adjust_gamma_video, make_video(), gamma=0.5)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.adjust_gamma, make_input(), gamma=0.5)
 
@@ -6219,10 +6228,14 @@ class TestAdjustGamma:
             (F.adjust_gamma_image, torch.Tensor),
             (F._color._adjust_gamma_image_pil, PIL.Image.Image),
             (F.adjust_gamma_image, tv_tensors.Image),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
             (F.adjust_gamma_video, tv_tensors.Video),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.adjust_gamma, input_type)
         check_functional_kernel_signature_match(F.adjust_gamma, kernel=kernel, input_type=input_type)
 
     def test_functional_error(self):
@@ -6238,6 +6251,24 @@ class TestAdjustGamma:
         expected = F.to_image(F.adjust_gamma(F.to_pil_image(image), gamma=gamma, gain=gain))
 
         assert_equal(actual, expected)
+
+    @needs_cvcuda
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_integration(self, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        reference = F.cvcuda_to_tensor(image).cpu()
+
+        actual = F.adjust_gamma(image, gamma=0.5, gain=0.75)
+        expected = F.adjust_gamma(reference, gamma=0.5, gain=0.75)
+
+        assert isinstance(actual, type(image))
+        assert actual.layout == image.layout
+        assert_close(F.cvcuda_to_tensor(actual).cpu(), expected, rtol=0, atol=5e-7 if dtype.is_floating_point else 0)
+
+    @needs_cvcuda
+    def test_cvcuda_negative_gamma(self):
+        with pytest.raises(ValueError, match="gamma must be non-negative"):
+            F.adjust_gamma(make_image_cvcuda(), gamma=-1)
 
 
 class TestAdjustHue:
