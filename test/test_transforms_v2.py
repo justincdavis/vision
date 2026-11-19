@@ -5938,7 +5938,11 @@ class TestInvert:
     def test_kernel_video(self):
         check_kernel(F.invert_video, make_video())
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image, make_image_pil, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.invert, make_input())
 
@@ -5949,12 +5953,21 @@ class TestInvert:
             (F._color._invert_image_pil, PIL.Image.Image),
             (F.invert_image, tv_tensors.Image),
             (F.invert_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.invert, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.invert
         check_functional_kernel_signature_match(F.invert, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_transform(self, make_input):
         check_transform(transforms.RandomInvert(p=1), make_input())
 
@@ -5965,6 +5978,14 @@ class TestInvert:
         actual = fn(image)
         expected = F.to_image(F.invert(F.to_pil_image(image)))
 
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("p", [0, 1])
+    def test_cvcuda_correctness(self, p):
+        image = torch.tensor([0, 64, 255], dtype=torch.uint8).reshape(3, 1, 1).expand(3, 5, 7).contiguous()
+        actual = transforms.RandomInvert(p=p)(F.to_cvcuda_tensor(image))
+        expected = 255 - image if p else image
         assert_equal(actual, expected)
 
 
