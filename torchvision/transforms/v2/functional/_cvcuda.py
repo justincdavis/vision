@@ -4,6 +4,7 @@ from typing import Any
 import torch
 from torch.torch_version import TorchVersion
 
+from ._meta import _validate_cvcuda_image
 from ._utils import _register_kernel_internal
 
 @functools.lru_cache(maxsize=1)
@@ -29,11 +30,6 @@ def _is_cvcuda_tensor(inpt: Any) -> bool:
     return _is_cvcuda_available() and isinstance(inpt, _import_cvcuda().Tensor)
 
 
-def _validate_cvcuda_image(inpt) -> None:
-    if (str(inpt.layout), inpt.ndim) not in (("CHW", 3), ("HWC", 3), ("NCHW", 4), ("NHWC", 4)):
-        raise ValueError("CV-CUDA images must have CHW, HWC, NCHW, or NHWC layout and matching rank 3 or 4.")
-
-
 def _register_cvcuda_kernel(functional, kernel):
     """Register a cvcuda.tv kernel on PyTorch's current stream, without changing Torch dispatch."""
 
@@ -49,10 +45,7 @@ def _register_cvcuda_kernel(functional, kernel):
     return wrapper
 
 
-def _register_all_cvcuda_kernels():
-    if not _is_cvcuda_available():
-        return
-
+if _is_cvcuda_available():
     from torchvision.transforms.v2 import functional as F
 
     # Augment

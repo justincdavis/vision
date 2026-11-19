@@ -165,7 +165,3 @@ from ._temporal import uniform_temporal_subsample, uniform_temporal_subsample_vi
 from ._type_conversion import cvcuda_to_tensor, pil_to_tensor, to_cvcuda_tensor, to_image, to_pil_image
 
 from ._deprecated import get_image_size, to_tensor  # usort: skip
-
-from ._cvcuda import _register_all_cvcuda_kernels  # usort: skip
-
-_register_all_cvcuda_kernels()

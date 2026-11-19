@@ -9,7 +9,6 @@ from torchvision.tv_tensors._bounding_boxes import CLAMPING_MODE_TYPE
 
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _validate_cvcuda_image
 from ._utils import _get_kernel, _register_kernel_internal, is_pure_tensor
 
 
@@ -111,6 +110,11 @@ def _get_size_image_pil(image: PIL.Image.Image) -> list[int]:
 @_register_kernel_internal(get_size, tv_tensors.Video, tv_tensor_wrapper=False)
 def get_size_video(video: torch.Tensor) -> list[int]:
     return get_size_image(video)
+
+
+def _validate_cvcuda_image(inpt) -> None:
+    if (str(inpt.layout), inpt.ndim) not in (("CHW", 3), ("HWC", 3), ("NCHW", 4), ("NHWC", 4)):
+        raise ValueError("CV-CUDA images must have CHW, HWC, NCHW, or NHWC layout and matching rank 3 or 4.")
 
 
 def _get_dimensions_image_cvcuda(image) -> list[int]:

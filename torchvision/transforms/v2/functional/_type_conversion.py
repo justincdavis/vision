@@ -7,8 +7,6 @@ import torch
 from torchvision import tv_tensors
 from torchvision.transforms import functional as _F
 
-from ._cvcuda import _import_cvcuda
-
 
 @torch.jit.unused
 def to_image(inpt: Union[torch.Tensor, PIL.Image.Image, np.ndarray]) -> tv_tensors.Image:
@@ -43,6 +41,8 @@ def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
         raise ValueError("Input must have CHW or NCHW shape (rank 3 or 4).")
     if inpt.requires_grad:
         raise ValueError("CV-CUDA does not support autograd. Detach the input explicitly.")
+    from ._cvcuda import _import_cvcuda
+
     cvcuda = _import_cvcuda()
     device = torch.device(device) if device is not None else (inpt.device if inpt.is_cuda else torch.device("cuda"))
     if device.type != "cuda":
@@ -58,6 +58,8 @@ def to_cvcuda_tensor(inpt: torch.Tensor, *, device=None):
 @torch.jit.unused
 def cvcuda_to_tensor(inpt) -> torch.Tensor:
     """Return a zero-copy CUDA Torch tensor, preserving shape, dtype, and device."""
+    from ._cvcuda import _import_cvcuda
+
     cvcuda = _import_cvcuda()
     if not isinstance(inpt, cvcuda.Tensor):
         raise TypeError(f"Input must be a cvcuda.Tensor, got {type(inpt)}.")
