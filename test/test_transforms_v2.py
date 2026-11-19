@@ -3406,6 +3406,7 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -3421,9 +3422,14 @@ class TestElastic:
             (F.elastic_mask, tv_tensors.Mask),
             (F.elastic_video, tv_tensors.Video),
             (F.elastic_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.elastic, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.elastic
         check_functional_kernel_signature_match(F.elastic, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -3457,6 +3463,7 @@ class TestElastic:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     # ElasticTransform needs larger images to avoid the needed internal padding being larger than the actual image
@@ -3473,6 +3480,37 @@ class TestElastic:
             make_input(size, device=device),
             check_v1_compatibility=check_v1_compatibility,
         )
+
+    @pytest.mark.needs_cvcuda
+    def test_displacement_shape_error_cvcuda(self):
+        image = make_image_cvcuda()
+        with pytest.raises(ValueError, match="displacement shape should be"):
+            F.elastic(image, displacement=torch.rand(F.get_size(image)))
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        displacement=[0, 0.1],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        displacement = self._make_displacement(image) * 0.1
+        kwargs = dict(displacement=displacement)
+        if param == "displacement":
+            kwargs[param] = torch.full_like(displacement, value)
+        elif param == "fill":
+            kwargs[param] = adapt_fill(value, dtype=dtype)
+        else:
+            kwargs[param] = value
+        actual = F.elastic(image, **kwargs)
+        expected = _import_cvcuda().tv.elastic(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "displacement" and value == 0:
+            assert_equal(actual, image)
 
 
 class TestToPureTensor:
