@@ -868,6 +868,7 @@ class TestResize:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, size, make_input):
@@ -891,9 +892,14 @@ class TestResize:
             (F.resize_mask, tv_tensors.Mask),
             (F.resize_video, tv_tensors.Video),
             (F.resize_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.resize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.resize
         check_functional_kernel_signature_match(F.resize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("size", OUTPUT_SIZES)
@@ -909,6 +915,7 @@ class TestResize:
             make_detection_masks,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_transform(self, size, device, make_input):
@@ -955,6 +962,48 @@ class TestResize:
 
         atol = 2 if interpolation == "lanczos" else 1
         torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        size=[17, [17], (17,), [12, 13], (12, 13), [17, 11]],
+        max_size=[18],
+        antialias=[True, False],
+        interpolation=["nearest", "nearest-exact", "bilinear", "bicubic", 0, 2, 3],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(self.INPUT_SIZE, dtype=dtype)
+        kwargs = dict(size=12, antialias=True)
+        kwargs[param] = value
+        actual = F.resize(image, **kwargs)
+        expected = _import_cvcuda().tv.resize(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        self._check_output_size(image, actual, size=kwargs["size"], max_size=kwargs.get("max_size"))
+        assert_equal(actual, expected)
+        if param == "size" and value == [17, 11]:
+            assert_equal(actual, image)
+
+    @pytest.mark.needs_cvcuda
+    def test_lanczos_error_cvcuda(self):
+        image = make_image_cvcuda(self.INPUT_SIZE)
+        with pytest.raises(NotImplementedError, match="'lanczos' interpolation is not supported"):
+            F.resize(image, size=12, interpolation="lanczos", antialias=True)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("interpolation", ["nearest-exact", "bilinear"])
+    @pytest.mark.parametrize("antialias", [True, False])
+    @pytest.mark.parametrize("fn", [F.resize, transform_cls_to_functional(transforms.Resize)])
+    def test_image_correctness_cvcuda(self, interpolation, antialias, fn):
+        image = make_image_cvcuda(self.INPUT_SIZE, dtype=torch.uint8)
+        kwargs = dict(size=12, interpolation=interpolation, antialias=antialias)
+        actual = F.cvcuda_to_tensor(fn(image, **kwargs)).cpu()
+        expected = fn(F.cvcuda_to_tensor(image).cpu(), **kwargs)
+        atol = 0 if interpolation == "nearest-exact" else 1
+        assert_close(actual, expected, atol=atol, rtol=0)
+        if antialias and interpolation == "bilinear":
+            expected_pil = fn(F.to_pil_image(F.cvcuda_to_tensor(image).cpu()), **kwargs)
+            assert_equal(actual, F.to_image(expected_pil), atol=1, rtol=0)
 
     def _reference_resize_bounding_boxes(self, bounding_boxes, format, *, size, max_size=None):
         old_height, old_width = bounding_boxes.canvas_size
@@ -1080,6 +1129,7 @@ class TestResize:
             make_detection_masks,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_max_size_error(self, size, make_input):
@@ -1123,6 +1173,7 @@ class TestResize:
             make_detection_masks,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_resize_size_none(self, input_size, max_size, expected_size, make_input):
@@ -1217,6 +1268,7 @@ class TestResize:
             make_detection_masks,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_no_regression_5405(self, make_input):
