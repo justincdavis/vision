@@ -1,4 +1,5 @@
 import functools
+import inspect
 from typing import Any
 
 import torch
@@ -30,8 +31,8 @@ def _is_cvcuda_tensor(inpt: Any) -> bool:
 
 
 def _validate_cvcuda_image(inpt) -> None:
-    if (str(inpt.layout), inpt.ndim) not in (("CHW", 3), ("NCHW", 4)):
-        raise ValueError("CV-CUDA images must have CHW or NCHW layout and rank 3 or 4.")
+    if (str(inpt.layout), inpt.ndim) not in (("CHW", 3), ("HWC", 3), ("NCHW", 4), ("NHWC", 4)):
+        raise ValueError("CV-CUDA images must have CHW, HWC, NCHW, or NHWC layout and matching rank 3 or 4.")
 
 
 def _register_cvcuda_kernel(functional, kernel):
@@ -47,3 +48,22 @@ def _register_cvcuda_kernel(functional, kernel):
 
     _register_kernel_internal(functional, _import_cvcuda().Tensor)(wrapper)
     return wrapper
+
+
+def _register_all_cvcuda_kernels():
+    if not _is_cvcuda_available():
+        return
+
+    from torchvision.transforms.v2 import functional as F
+
+    for name in _import_cvcuda().tv.__all__:
+        if name == "Compose":
+            continue
+        kernel = getattr(_import_cvcuda().tv, name)
+        functional = getattr(F, name, None)
+        if inspect.isfunction(kernel) and inspect.isfunction(functional):
+            _register_cvcuda_kernel(functional, kernel)
+
+    for name in ("get_dimensions", "get_num_channels", "get_size"):
+        kernel = getattr(F._meta, f"_{name}_image_cvcuda")
+        _register_kernel_internal(getattr(F, name), _import_cvcuda().Tensor)(kernel)
