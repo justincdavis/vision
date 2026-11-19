@@ -8118,7 +8118,16 @@ class TestJPEG:
 
         assert_equal(actual, expected)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.jpeg, make_input(), quality=5)
 
@@ -8129,16 +8138,43 @@ class TestJPEG:
             (F._augment._jpeg_image_pil, PIL.Image.Image),
             (F.jpeg_image, tv_tensors.Image),
             (F.jpeg_video, tv_tensors.Video),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.jpeg, input_type)
         check_functional_kernel_signature_match(F.jpeg, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     @pytest.mark.parametrize("quality", [5, (10, 20)])
     @pytest.mark.parametrize("color_space", ["RGB", "GRAY"])
     def test_transform(self, make_input, quality, color_space):
         check_transform(transforms.JPEG(quality=quality), make_input(color_space=color_space))
+
+    @needs_cvcuda
+    def test_cvcuda_dispatch(self):
+        image = make_image_cvcuda(batch_dims=(2,))
+        cvcuda = _import_cvcuda()
+        stream = cvcuda.as_stream(torch.cuda.current_stream().cuda_stream)
+        # CV-CUDA simulates JPEG artifacts; it is not a CPU codec/encoded-byte oracle.
+        expected = cvcuda.tv.jpeg(image, quality=75, stream=stream)
+        actual = F.jpeg(image, quality=75)
+        assert isinstance(actual, type(image))
+        assert actual.shape == image.shape
+        assert actual.dtype == image.dtype
+        assert_equal(actual, expected)
+        assert_equal(transforms.JPEG(quality=75)(image), expected)
 
     @pytest.mark.parametrize("quality", [5])
     def test_functional_image_correctness(self, quality):
