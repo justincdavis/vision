@@ -9,7 +9,7 @@ from torchvision.tv_tensors._bounding_boxes import CLAMPING_MODE_TYPE
 
 from torchvision.utils import _log_api_usage_once
 
-from ._cvcuda import _import_cvcuda, _is_cvcuda_available, _validate_cvcuda_image
+from ._cvcuda import _validate_cvcuda_image
 from ._utils import _get_kernel, _register_kernel_internal, is_pure_tensor
 
 
@@ -113,23 +113,18 @@ def get_size_video(video: torch.Tensor) -> list[int]:
     return get_size_image(video)
 
 
-def get_dimensions_image_cvcuda(image) -> list[int]:
+def _get_dimensions_image_cvcuda(image) -> list[int]:
     _validate_cvcuda_image(image)
-    return list(image.shape[-3:])
+    layout = str(image.layout)
+    return [image.shape[layout.index(axis)] for axis in "CHW"]
 
 
-def get_num_channels_image_cvcuda(image) -> int:
-    return get_dimensions_image_cvcuda(image)[0]
+def _get_num_channels_image_cvcuda(image) -> int:
+    return _get_dimensions_image_cvcuda(image)[0]
 
 
-def get_size_image_cvcuda(image) -> list[int]:
-    return get_dimensions_image_cvcuda(image)[1:]
-
-
-if _is_cvcuda_available():
-    _register_kernel_internal(get_dimensions, _import_cvcuda().Tensor)(get_dimensions_image_cvcuda)
-    _register_kernel_internal(get_num_channels, _import_cvcuda().Tensor)(get_num_channels_image_cvcuda)
-    _register_kernel_internal(get_size, _import_cvcuda().Tensor)(get_size_image_cvcuda)
+def _get_size_image_cvcuda(image) -> list[int]:
+    return _get_dimensions_image_cvcuda(image)[1:]
 
 
 @_register_kernel_internal(get_size, tv_tensors.Mask, tv_tensor_wrapper=False)
