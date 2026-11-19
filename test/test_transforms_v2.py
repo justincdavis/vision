@@ -2703,10 +2703,10 @@ class TestToDtype:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.to_dtype, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.to_dtype
         check_functional_kernel_signature_match(F.to_dtype, kernel=kernel, input_type=input_type)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video,
-        pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
+    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_video])
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -2721,8 +2721,7 @@ class TestToDtype:
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image, make_bounding_boxes, make_segmentation_mask, make_video,
-         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+        [make_image_tensor, make_image, make_bounding_boxes, make_segmentation_mask, make_video],
     )
     @pytest.mark.parametrize("input_dtype", [torch.float32, torch.float64, torch.uint8])
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8])
@@ -2772,37 +2771,35 @@ class TestToDtype:
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("scale", (True, False))
-    @pytest.mark.parametrize("make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)])
-    @pytest.mark.parametrize("fn", [F.to_dtype, transform_cls_to_functional(transforms.ToDtype)])
-    def test_image_correctness(self, input_dtype, output_dtype, device, scale, make_input, fn):
+    def test_image_correctness(self, input_dtype, output_dtype, device, scale):
         if input_dtype.is_floating_point and output_dtype == torch.int64:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
             pytest.xfail("uint8 to uint16 conversion is not supported on cuda")
 
-        input = make_input(dtype=input_dtype, device=device)
-        out = fn(input, dtype=output_dtype, scale=scale)
-        if make_input is make_image_cvcuda:
-            input = F.cvcuda_to_tensor(input)
-            out = F.cvcuda_to_tensor(out)
+        input = make_image(dtype=input_dtype, device=device)
+
+        out = F.to_dtype(input, dtype=output_dtype, scale=scale)
         expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
 
-        if make_input is make_image_cvcuda:
-            in_bits = None if input_dtype.is_floating_point else torch.iinfo(input_dtype).bits
-            out_bits = None if output_dtype.is_floating_point else torch.iinfo(output_dtype).bits
-            if (in_bits is not None and out_bits is not None and out_bits < in_bits) or (
-                input_dtype.is_floating_point and not output_dtype.is_floating_point
-            ):
-                atol = 1
-            elif not input_dtype.is_floating_point and output_dtype.is_floating_point:
-                atol = 1e-7
-            else:
-                atol = 0
-            torch.testing.assert_close(out, expected, atol=atol, rtol=0)
-        elif input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
+        if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
             torch.testing.assert_close(out, expected, atol=1, rtol=0)
         else:
             torch.testing.assert_close(out, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("scale", [False, True])
+    @pytest.mark.parametrize("as_dict", [False, True])
+    def test_cvcuda_dtype_scale(self, scale, as_dict):
+        image = torch.tensor([0, 255], dtype=torch.uint8).reshape(1, 1, 2).expand(3, 4, 2).contiguous()
+        input = F.to_cvcuda_tensor(image)
+        check_functional(F.to_dtype, input, dtype=torch.float32, scale=scale)
+        dtype = {type(input): torch.float32} if as_dict else torch.float32
+        actual = check_transform(transforms.ToDtype(dtype=dtype, scale=scale), input)
+        actual = F.cvcuda_to_tensor(actual).cpu()
+        assert actual.dtype is torch.float32
+        expected = image.float() / (255 if scale else 1)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
     def was_scaled(self, inpt):
         # this assumes the target dtype is float
