@@ -5551,7 +5551,11 @@ class TestEqualize:
     def test_kernel_video(self):
         check_kernel(F.equalize_image, make_video())
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+    )
     def test_functional(self, make_input):
         check_functional(F.equalize, make_input())
 
@@ -5562,14 +5566,20 @@ class TestEqualize:
             (F._color._equalize_image_pil, PIL.Image.Image),
             (F.equalize_image, tv_tensors.Image),
             (F.equalize_video, tv_tensors.Video),
+            pytest.param(None, "cvcuda.Tensor", marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if input_type == "cvcuda.Tensor":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.equalize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.equalize
         check_functional_kernel_signature_match(F.equalize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video],
+        [make_image_tensor, make_image_pil, make_image, make_video,
+         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
     )
     def test_transform(self, make_input):
         check_transform(transforms.RandomEqualize(p=1), make_input())
@@ -5588,6 +5598,16 @@ class TestEqualize:
         actual = fn(image)
         expected = F.to_image(F.equalize(F.to_pil_image(image)))
 
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("constant", [True, False])
+    def test_cvcuda_correctness(self, constant):
+        image = torch.full((3, 32, 32), 127, dtype=torch.uint8) if constant else torch.tensor(
+            [0, 32, 64, 128], dtype=torch.uint8
+        ).repeat(3, 32, 8)
+        actual = transforms.RandomEqualize(p=1)(F.to_cvcuda_tensor(image))
+        expected = F.equalize(F.to_pil_image(image))
         assert_equal(actual, expected)
 
 
