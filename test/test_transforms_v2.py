@@ -2771,7 +2771,8 @@ class TestToDtype:
     @pytest.mark.parametrize("output_dtype", [torch.float32, torch.float64, torch.uint8, torch.uint16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     @pytest.mark.parametrize("scale", (True, False))
-    def test_image_correctness(self, input_dtype, output_dtype, device, scale):
+    @pytest.mark.parametrize("fn", [F.to_dtype, transform_cls_to_functional(transforms.ToDtype)])
+    def test_image_correctness(self, input_dtype, output_dtype, device, scale, fn):
         if input_dtype.is_floating_point and output_dtype == torch.int64:
             pytest.xfail("float to int64 conversion is not supported")
         if input_dtype == torch.uint8 and output_dtype == torch.uint16 and device == "cuda":
@@ -2779,7 +2780,7 @@ class TestToDtype:
 
         input = make_image(dtype=input_dtype, device=device)
 
-        out = F.to_dtype(input, dtype=output_dtype, scale=scale)
+        out = fn(input, dtype=output_dtype, scale=scale)
         expected = self.reference_convert_dtype_image_tensor(input, dtype=output_dtype, scale=scale)
 
         if input_dtype.is_floating_point and not output_dtype.is_floating_point and scale:
