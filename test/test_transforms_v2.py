@@ -5601,6 +5601,7 @@ class TestEqualize:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.equalize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.equalize
         check_functional_kernel_signature_match(F.equalize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -5612,12 +5613,8 @@ class TestEqualize:
         check_transform(transforms.RandomEqualize(p=1), make_input())
 
     @pytest.mark.parametrize(("low", "high"), [(0, 64), (64, 192), (192, 256), (0, 1), (127, 128), (255, 256)])
-    @pytest.mark.parametrize(
-        "tensor_type",
-        [torch.Tensor, pytest.param("cvcuda.Tensor", marks=pytest.mark.needs_cvcuda)],
-    )
     @pytest.mark.parametrize("fn", [F.equalize, transform_cls_to_functional(transforms.RandomEqualize, p=1)])
-    def test_image_correctness(self, low, high, tensor_type, fn):
+    def test_image_correctness(self, low, high, fn):
         # We are not using the default `make_image` here since that uniformly samples the values over the whole value
         # range. Since the whole point of F.equalize is to transform an arbitrary distribution of values into a uniform
         # one over the full range, the information gain is low if we already provide something really close to the
@@ -5626,19 +5623,20 @@ class TestEqualize:
             torch.testing.make_tensor((3, 117, 253), dtype=torch.uint8, device="cpu", low=low, high=high)
         )
 
-        is_cvcuda = tensor_type == "cvcuda.Tensor"
-        if is_cvcuda:
-            image = F.to_cvcuda_tensor(image)
         actual = fn(image)
-        if is_cvcuda:
-            actual = F.cvcuda_to_tensor(actual).cpu()
-            image = F.cvcuda_to_tensor(image).cpu()
         expected = F.to_image(F.equalize(F.to_pil_image(image)))
 
-        if is_cvcuda:
-            assert_close(actual, expected, rtol=1e-10, atol=1)
-        else:
-            assert_equal(actual, expected)
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("constant", [True, False])
+    def test_cvcuda_correctness(self, constant):
+        image = torch.full((3, 32, 32), 127, dtype=torch.uint8) if constant else torch.tensor(
+            [0, 32, 64, 128], dtype=torch.uint8
+        ).repeat(3, 32, 8)
+        actual = transforms.RandomEqualize(p=1)(F.to_cvcuda_tensor(image))
+        expected = F.equalize(F.to_pil_image(image))
+        assert_equal(actual, expected)
 
 
 class TestUniformTemporalSubsample:
