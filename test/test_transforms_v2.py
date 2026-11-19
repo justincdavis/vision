@@ -1586,6 +1586,7 @@ class TestAffine:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -1601,9 +1602,14 @@ class TestAffine:
             (F.affine_mask, tv_tensors.Mask),
             (F.affine_video, tv_tensors.Video),
             (F.affine_keypoints, tv_tensors.KeyPoints),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.affine, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.affine
         check_functional_kernel_signature_match(F.affine, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -1616,6 +1622,7 @@ class TestAffine:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     @pytest.mark.parametrize("device", cpu_and_cuda())
@@ -1623,6 +1630,31 @@ class TestAffine:
         input = make_input(device=device)
 
         check_transform(transforms.RandomAffine(**self._CORRECTNESS_TRANSFORM_AFFINE_RANGES), input)
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        angle=[0, 17],
+        translate=[[0, 0], [2, -1]],
+        scale=[1, 0.8],
+        shear=[0, [12, -5]],
+        center=[None, [3, 4]],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        if param == "fill":
+            value = adapt_fill(value, dtype=dtype)
+        kwargs = dict(angle=17, translate=[0, 0], scale=1, shear=[0, 0])
+        kwargs[param] = value
+        actual = F.affine(image, **kwargs)
+        expected = _import_cvcuda().tv.affine(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "angle" and value == 0:
+            assert_equal(actual, image)
 
     @pytest.mark.parametrize("angle", _CORRECTNESS_AFFINE_KWARGS["angle"])
     @pytest.mark.parametrize("translate", _CORRECTNESS_AFFINE_KWARGS["translate"])
