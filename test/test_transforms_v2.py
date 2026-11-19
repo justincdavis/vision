@@ -4120,7 +4120,7 @@ class TestGaussianBlur:
             ((1, 26, 28), (23, 23), 1.7),
         ],
     )
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.float16])
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32, torch.float64, torch.float16])
     @pytest.mark.parametrize("device", cpu_and_cuda())
     def test_functional_image_correctness(self, dimensions, kernel_size, sigma, dtype, device):
         if dtype is torch.float16 and device == "cpu":
