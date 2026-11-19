@@ -21,7 +21,7 @@ from torch.testing._comparison import BooleanPair, NonePair, not_close_error_met
 from torchvision import tv_tensors
 from torchvision.transforms._functional_tensor import _max_value as get_max_value
 from torchvision.transforms.v2.functional import cvcuda_to_tensor, to_cvcuda_tensor, to_image, to_pil_image
-from torchvision.transforms.v2.functional._cvcuda import _is_cvcuda_available, _is_cvcuda_tensor
+from torchvision.transforms.v2.functional._cvcuda import _is_cvcuda_available, _is_cvcuda_tensor, _validate_cvcuda_image
 from torchvision.utils import _Image_fromarray
 
 
@@ -291,20 +291,16 @@ class ImagePair(TensorLikePair):
         mae=False,
         **other_parameters,
     ):
-        cvcuda_pair = _is_cvcuda_tensor(actual) or _is_cvcuda_tensor(expected)
-        actual, expected = (
-            to_image(input) if isinstance(input, PIL.Image.Image) else input for input in [actual, expected]
-        )
-        if cvcuda_pair:
-            actual, expected = (
-                cvcuda_to_tensor(input).cpu() if _is_cvcuda_tensor(input) else input for input in [actual, expected]
-            )
-            if actual.ndim == 4 and actual.shape[0] == 1 and expected.ndim == 3:
-                actual = actual[0]
-            elif expected.ndim == 4 and expected.shape[0] == 1 and actual.ndim == 3:
-                expected = expected[0]
+        images = []
+        for image in (actual, expected):
+            if isinstance(image, PIL.Image.Image):
+                image = to_image(image)
+            elif _is_cvcuda_tensor(image):
+                _validate_cvcuda_image(image)
+                image = cvcuda_to_tensor(image).movedim(str(image.layout).index("C"), -3).cpu()
+            images.append(image)
 
-        super().__init__(actual, expected, **other_parameters)
+        super().__init__(*images, **other_parameters)
         self.mae = mae
 
     def compare(self) -> None:
@@ -417,8 +413,8 @@ def make_image_pil(*args, **kwargs):
     return to_pil_image(make_image(*args, **kwargs))
 
 
-def make_image_cvcuda(*args, batch_dims=(1,), **kwargs):
-    return to_cvcuda_tensor(make_image(*args, batch_dims=batch_dims, **kwargs))
+def make_image_cvcuda(*args, **kwargs):
+    return to_cvcuda_tensor(make_image(*args, **kwargs))
 
 
 def make_keypoints(canvas_size=DEFAULT_SIZE, *, num_points=4, dtype=None, device="cpu"):
