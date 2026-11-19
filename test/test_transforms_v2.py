@@ -6031,7 +6031,16 @@ class TestSolarize:
         video = make_video()
         check_kernel(F.solarize_video, video, threshold=self._make_threshold(video))
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image, make_image_pil, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image,
+            make_image_pil,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         input = make_input()
         check_functional(F.solarize, input, threshold=self._make_threshold(input))
@@ -6043,9 +6052,13 @@ class TestSolarize:
             (F._color._solarize_image_pil, PIL.Image.Image),
             (F.solarize_image, tv_tensors.Image),
             (F.solarize_video, tv_tensors.Video),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.solarize, input_type)
         check_functional_kernel_signature_match(F.solarize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(("dtype", "threshold"), [(torch.uint8, 256), (torch.float, 1.5)])
@@ -6053,10 +6066,27 @@ class TestSolarize:
         with pytest.raises(TypeError, match="Threshold should be less or equal the maximum value of the dtype"):
             F.solarize(make_image(dtype=dtype), threshold=threshold)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_transform(self, make_input):
         input = make_input()
         check_transform(transforms.RandomSolarize(threshold=self._make_threshold(input), p=1), input)
+
+    @needs_cvcuda
+    def test_cvcuda_dispatch(self):
+        image = make_image_cvcuda(batch_dims=(2,))
+        reference = F.cvcuda_to_tensor(image).cpu()
+        actual = F.solarize(image, threshold=128)
+        expected = F.solarize(reference, threshold=128)
+        assert_equal(actual, expected)
 
     @pytest.mark.parametrize("threshold_factor", [0.0, 0.1, 0.5, 0.9, 1.0])
     @pytest.mark.parametrize("fn", [F.solarize, transform_cls_to_functional(transforms.RandomSolarize, p=1)])
