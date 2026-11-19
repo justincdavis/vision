@@ -115,7 +115,9 @@ class ToCVCUDATensor(Transform):
 
 
 class CVCUDAToTensor(Transform):
-    """Convert CV-CUDA images to zero-copy CUDA Torch tensors, preserving CHW/NCHW layout.
+    """Convert CV-CUDA tensors to zero-copy CUDA Torch tensors.
+
+    Preserves shape, axis order, dtype, values, and CUDA device without permuting channels.
 
     This transform does not support TorchScript.
     """
