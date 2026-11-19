@@ -4831,6 +4831,7 @@ class TestPad:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional(self, make_input):
@@ -4849,9 +4850,14 @@ class TestPad:
             (F.pad_bounding_boxes, tv_tensors.BoundingBoxes),
             (F.pad_mask, tv_tensors.Mask),
             (F.pad_video, tv_tensors.Video),
+            pytest.param("cvcuda", None, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel == "cvcuda":
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.pad, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.pad
         check_functional_kernel_signature_match(F.pad, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -4864,6 +4870,7 @@ class TestPad:
             make_segmentation_mask,
             make_video,
             make_keypoints,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
         ],
     )
     def test_transform(self, make_input):
@@ -4887,6 +4894,25 @@ class TestPad:
 
         with pytest.raises(ValueError, match="Padding mode should be either"):
             transforms.Pad(12, padding_mode="abc")
+
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        padding=[0, 1, (1,), (1, 2), (1, 2, 3, 4), [1], [1, 2], [1, 2, 3, 4]],
+        padding_mode=PADDING_MODES,
+        fill=[None, 0, [1, 2, 3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        kwargs = dict(padding=1)
+        kwargs[param] = value
+        actual = F.pad(image, **kwargs)
+        expected = _import_cvcuda().tv.pad(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "padding" and value == 0:
+            assert_equal(actual, image)
 
     @pytest.mark.parametrize("padding", CORRECTNESS_PADDINGS)
     @pytest.mark.parametrize(
