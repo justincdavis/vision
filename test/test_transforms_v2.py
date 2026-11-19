@@ -5988,6 +5988,7 @@ class TestInvert:
         if input_type == "cvcuda.Tensor":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.invert, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.invert
         check_functional_kernel_signature_match(F.invert, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -5998,19 +5999,21 @@ class TestInvert:
     def test_transform(self, make_input):
         check_transform(transforms.RandomInvert(p=1), make_input())
 
-    @pytest.mark.parametrize(
-        "make_input",
-        [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
-    )
     @pytest.mark.parametrize("fn", [F.invert, transform_cls_to_functional(transforms.RandomInvert, p=1)])
-    def test_correctness_image(self, make_input, fn):
-        image = make_input(dtype=torch.uint8, device="cpu")
+    def test_correctness_image(self, fn):
+        image = make_image(dtype=torch.uint8, device="cpu")
 
         actual = fn(image)
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.invert(F.to_pil_image(image)))
 
+        assert_equal(actual, expected)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("p", [0, 1])
+    def test_cvcuda_correctness(self, p):
+        image = torch.tensor([0, 64, 255], dtype=torch.uint8).reshape(3, 1, 1).expand(3, 5, 7).contiguous()
+        actual = transforms.RandomInvert(p=p)(F.to_cvcuda_tensor(image))
+        expected = 255 - image if p else image
         assert_equal(actual, expected)
 
 
