@@ -4857,6 +4857,7 @@ class TestPad:
         if kernel == "cvcuda":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.pad, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.pad
         check_functional_kernel_signature_match(F.pad, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -4894,9 +4895,25 @@ class TestPad:
         with pytest.raises(ValueError, match="Padding mode should be either"):
             transforms.Pad(12, padding_mode="abc")
 
-    @pytest.mark.parametrize(
-        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        padding=[0, 1, (1,), (1, 2), (1, 2, 3, 4), [1], [1, 2], [1, 2, 3, 4]],
+        padding_mode=PADDING_MODES,
+        fill=[None, 0, [1, 2, 3]],
     )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        kwargs = dict(padding=1)
+        kwargs[param] = value
+        actual = F.pad(image, **kwargs)
+        expected = _import_cvcuda().tv.pad(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "padding" and value == 0:
+            assert_equal(actual, image)
+
     @pytest.mark.parametrize("padding", CORRECTNESS_PADDINGS)
     @pytest.mark.parametrize(
         ("padding_mode", "fill"),
@@ -4906,14 +4923,12 @@ class TestPad:
         ],
     )
     @pytest.mark.parametrize("fn", [F.pad, transform_cls_to_functional(transforms.Pad)])
-    def test_image_correctness(self, make_input, padding, padding_mode, fill, fn):
-        image = make_input(dtype=torch.uint8, device="cpu")
+    def test_image_correctness(self, padding, padding_mode, fill, fn):
+        image = make_image(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
         actual = fn(image, padding=padding, padding_mode=padding_mode, fill=fill)
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(F.pad(F.to_pil_image(image), padding=padding, padding_mode=padding_mode, fill=fill))
 
         assert_equal(actual, expected)
