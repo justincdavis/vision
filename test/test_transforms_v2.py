@@ -3290,7 +3290,16 @@ class TestPermuteChannels:
     def test_kernel(self, kernel, make_input, dtype, device):
         check_kernel(kernel, make_input(dtype=dtype, device=device), permutation=self._DEFAULT_PERMUTATION)
 
-    @pytest.mark.parametrize("make_input", [make_image_tensor, make_image_pil, make_image, make_video])
+    @pytest.mark.parametrize(
+        "make_input",
+        [
+            make_image_tensor,
+            make_image_pil,
+            make_image,
+            make_video,
+            pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda),
+        ],
+    )
     def test_functional(self, make_input):
         check_functional(F.permute_channels, make_input(), permutation=self._DEFAULT_PERMUTATION)
 
@@ -3301,10 +3310,22 @@ class TestPermuteChannels:
             (F._color._permute_channels_image_pil, PIL.Image.Image),
             (F.permute_channels_image, tv_tensors.Image),
             (F.permute_channels_video, tv_tensors.Video),
+            pytest.param(None, None, marks=pytest.mark.needs_cvcuda, id="cvcuda"),
         ],
     )
     def test_functional_signature(self, kernel, input_type):
+        if kernel is None:
+            input_type = _import_cvcuda().Tensor
+            kernel = _get_kernel(F.permute_channels, input_type)
         check_functional_kernel_signature_match(F.permute_channels, kernel=kernel, input_type=input_type)
+
+    @needs_cvcuda
+    def test_cvcuda_dispatch(self):
+        image = make_image_cvcuda(batch_dims=(2,))
+        reference = F.cvcuda_to_tensor(image).cpu()
+        actual = F.permute_channels(image, permutation=self._DEFAULT_PERMUTATION)
+        expected = F.permute_channels(reference, permutation=self._DEFAULT_PERMUTATION)
+        assert_equal(actual, expected)
 
     def reference_image_correctness(self, image, permutation):
         channel_images = image.split(1, dim=-3)
