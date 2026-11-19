@@ -899,6 +899,7 @@ class TestResize:
         if kernel == "cvcuda":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.resize, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.resize
         check_functional_kernel_signature_match(F.resize, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize("size", OUTPUT_SIZES)
@@ -932,27 +933,21 @@ class TestResize:
             input_size=F.get_size(input), size=size, max_size=max_size
         )
 
-    @pytest.mark.parametrize(
-        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
-    )
     @pytest.mark.parametrize("size", OUTPUT_SIZES)
     # `InterpolationMode.NEAREST` is modeled after the buggy `INTER_NEAREST` interpolation of CV2.
     # The PIL equivalent of `InterpolationMode.NEAREST` is `InterpolationMode.NEAREST_EXACT`
     @pytest.mark.parametrize("interpolation", set(INTERPOLATION_MODES_STR) - {"nearest"})
     @pytest.mark.parametrize("use_max_size", [True, False])
     @pytest.mark.parametrize("fn", [F.resize, transform_cls_to_functional(transforms.Resize)])
-    def test_image_correctness(self, make_input, size, interpolation, use_max_size, fn):
+    def test_image_correctness(self, size, interpolation, use_max_size, fn):
         if not (max_size_kwarg := self._make_max_size_kwarg(use_max_size=use_max_size, size=size)):
             return
 
-        image = make_input(self.INPUT_SIZE, dtype=torch.uint8)
+        image = make_image(self.INPUT_SIZE, dtype=torch.uint8)
 
         actual = fn(image, size=size, interpolation=interpolation, **max_size_kwarg, antialias=True)
         self._check_output_size(image, actual, size=size, **max_size_kwarg)
 
-        if make_input is make_image_cvcuda:
-            image = F.cvcuda_to_tensor(image)[0].cpu()
-            actual = F.cvcuda_to_tensor(actual)[0].cpu()
         expected = F.to_pil_image(image)
         if PILLOW_VERSION >= (13, 0) and tuple(F.get_size(actual)) == (12, 13):
             # PIL resizes in two separable passes with uint8 rounding in between, so the pass order affects the
@@ -966,27 +961,49 @@ class TestResize:
         expected = F.to_image(expected)
 
         atol = 2 if interpolation == "lanczos" else 1
-        if make_input is make_image_cvcuda:
-            if interpolation in {"bilinear", "bicubic"}:
-                atol = 9
-            assert_close(actual, expected, atol=atol, rtol=0)
-        else:
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+        torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
 
-    @needs_cvcuda
-    @pytest.mark.parametrize("size", OUTPUT_SIZES)
-    @pytest.mark.parametrize("interpolation", set(INTERPOLATION_MODES) - {transforms.InterpolationMode.NEAREST})
-    @pytest.mark.parametrize("use_max_size", [True, False])
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        size=[17, [17], (17,), [12, 13], (12, 13), [17, 11]],
+        max_size=[18],
+        antialias=[True, False],
+        interpolation=["nearest", "nearest-exact", "bilinear", "bicubic", 0, 2, 3],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(self.INPUT_SIZE, dtype=dtype)
+        kwargs = dict(size=12, antialias=True)
+        kwargs[param] = value
+        actual = F.resize(image, **kwargs)
+        expected = _import_cvcuda().tv.resize(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        self._check_output_size(image, actual, size=kwargs["size"], max_size=kwargs.get("max_size"))
+        assert_equal(actual, expected)
+        if param == "size" and value == [17, 11]:
+            assert_equal(actual, image)
+
+    @pytest.mark.needs_cvcuda
+    def test_lanczos_error_cvcuda(self):
+        image = make_image_cvcuda(self.INPUT_SIZE)
+        with pytest.raises(NotImplementedError, match="'lanczos' interpolation is not supported"):
+            F.resize(image, size=12, interpolation="lanczos", antialias=True)
+
+    @pytest.mark.needs_cvcuda
+    @pytest.mark.parametrize("interpolation", ["nearest-exact", "bilinear"])
     @pytest.mark.parametrize("antialias", [True, False])
     @pytest.mark.parametrize("fn", [F.resize, transform_cls_to_functional(transforms.Resize)])
-    def test_image_correctness_cvcuda(self, size, interpolation, use_max_size, antialias, fn):
-        if not (max_size_kwarg := self._make_max_size_kwarg(use_max_size=use_max_size, size=size)):
-            return
+    def test_image_correctness_cvcuda(self, interpolation, antialias, fn):
         image = make_image_cvcuda(self.INPUT_SIZE, dtype=torch.uint8)
-        actual = F.cvcuda_to_tensor(fn(image, size=size, interpolation=interpolation, **max_size_kwarg, antialias=antialias))
-        expected = fn(F.cvcuda_to_tensor(image), size=size, interpolation=interpolation, **max_size_kwarg, antialias=antialias)
-        atol = 9 if antialias else 91 if interpolation == transforms.InterpolationMode.BICUBIC else 1
+        kwargs = dict(size=12, interpolation=interpolation, antialias=antialias)
+        actual = F.cvcuda_to_tensor(fn(image, **kwargs)).cpu()
+        expected = fn(F.cvcuda_to_tensor(image).cpu(), **kwargs)
+        atol = 0 if interpolation == "nearest-exact" else 1
         assert_close(actual, expected, atol=atol, rtol=0)
+        if antialias and interpolation == "bilinear":
+            expected_pil = fn(F.to_pil_image(F.cvcuda_to_tensor(image).cpu()), **kwargs)
+            assert_equal(actual, F.to_image(expected_pil), atol=1, rtol=0)
 
     def _reference_resize_bounding_boxes(self, bounding_boxes, format, *, size, max_size=None):
         old_height, old_width = bounding_boxes.canvas_size
@@ -1072,13 +1089,10 @@ class TestResize:
     @pytest.mark.parametrize("interpolation", set(transforms.InterpolationMode) - set(INTERPOLATION_MODES))
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video,
-         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+        [make_image_tensor, make_image_pil, make_image, make_video],
     )
     def test_pil_interpolation_compat_smoke(self, interpolation, make_input):
         input = make_input(self.INPUT_SIZE)
-        if make_input is make_image_cvcuda and interpolation in {transforms.InterpolationMode.BOX, transforms.InterpolationMode.LANCZOS}:
-            pytest.xfail("CV-CUDA may support box and lanczos for certain resize configurations")
 
         with (
             contextlib.nullcontext()
@@ -1170,8 +1184,7 @@ class TestResize:
     @pytest.mark.parametrize("interpolation", INTERPOLATION_MODES)
     @pytest.mark.parametrize(
         "make_input",
-        [make_image_tensor, make_image_pil, make_image, make_video,
-         pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)],
+        [make_image_tensor, make_image_pil, make_image, make_video],
     )
     def test_interpolation_int(self, interpolation, make_input):
         input = make_input(self.INPUT_SIZE)
