@@ -2196,6 +2196,7 @@ class TestRotate:
         if kernel == "cvcuda":
             input_type = _import_cvcuda().Tensor
             kernel = _get_kernel(F.rotate, input_type)
+            assert kernel.__wrapped__ is _import_cvcuda().tv.rotate
         check_functional_kernel_signature_match(F.rotate, kernel=kernel, input_type=input_type)
 
     @pytest.mark.parametrize(
@@ -2217,23 +2218,40 @@ class TestRotate:
             transforms.RandomRotation(**self._CORRECTNESS_TRANSFORM_AFFINE_RANGES), make_input(device=device)
         )
 
+    @pytest.mark.needs_cvcuda
+    @param_value_parametrization(
+        angle=[0, 17],
+        center=[None, [3, 4]],
+        expand=[False, True],
+        interpolation=["nearest", "bilinear"],
+        fill=[None, [0.1, 0.2, 0.3]],
+    )
+    @pytest.mark.parametrize("dtype", [torch.uint8, torch.float32])
+    def test_cvcuda_arguments(self, param, value, dtype):
+        image = make_image_cvcuda(dtype=dtype)
+        if param == "fill":
+            value = adapt_fill(value, dtype=dtype)
+        kwargs = dict(angle=17)
+        kwargs[param] = value
+        actual = F.rotate(image, **kwargs)
+        expected = _import_cvcuda().tv.rotate(image, **kwargs)
+        assert isinstance(actual, _import_cvcuda().Tensor)
+        assert str(actual.layout) == str(image.layout)
+        assert_equal(actual, expected)
+        if param == "angle" and value == 0:
+            assert_equal(actual, image)
+
     @pytest.mark.parametrize("angle", _CORRECTNESS_AFFINE_KWARGS["angle"])
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("expand", [False, True])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
-    @pytest.mark.parametrize(
-        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
-    )
-    def test_functional_image_correctness(self, angle, center, interpolation, expand, fill, make_input):
-        image = make_input(dtype=torch.uint8, device="cpu")
+    def test_functional_image_correctness(self, angle, center, interpolation, expand, fill):
+        image = make_image(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
         actual = F.rotate(image, angle=angle, center=center, interpolation=interpolation, expand=expand, fill=fill)
-        if make_input is make_image_cvcuda:
-            actual = F.cvcuda_to_tensor(actual)[0].cpu()
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(
             F.rotate(
                 F.to_pil_image(image), angle=angle, center=center, interpolation=interpolation, expand=expand, fill=fill
@@ -2241,21 +2259,15 @@ class TestRotate:
         )
 
         mae = (actual.float() - expected.float()).abs().mean()
-        if make_input is make_image_cvcuda:
-            assert mae < (122.5 if interpolation == "nearest" else 6), f"MAE: {mae}"
-        else:
-            assert mae < 1 if interpolation == "nearest" else 6
+        assert mae < 1 if interpolation == "nearest" else 6
 
     @pytest.mark.parametrize("center", _CORRECTNESS_AFFINE_KWARGS["center"])
     @pytest.mark.parametrize("interpolation", ["nearest", "bilinear"])
     @pytest.mark.parametrize("expand", [False, True])
     @pytest.mark.parametrize("fill", CORRECTNESS_FILLS)
     @pytest.mark.parametrize("seed", list(range(5)))
-    @pytest.mark.parametrize(
-        "make_input", [make_image, pytest.param(make_image_cvcuda, marks=pytest.mark.needs_cvcuda)]
-    )
-    def test_transform_image_correctness(self, center, interpolation, expand, fill, seed, make_input):
-        image = make_input(dtype=torch.uint8, device="cpu")
+    def test_transform_image_correctness(self, center, interpolation, expand, fill, seed):
+        image = make_image(dtype=torch.uint8, device="cpu")
 
         fill = adapt_fill(fill, dtype=torch.uint8)
 
@@ -2271,16 +2283,10 @@ class TestRotate:
         actual = transform(image)
 
         torch.manual_seed(seed)
-        if make_input is make_image_cvcuda:
-            actual = F.cvcuda_to_tensor(actual)[0].cpu()
-            image = F.cvcuda_to_tensor(image)[0].cpu()
         expected = F.to_image(transform(F.to_pil_image(image)))
 
         mae = (actual.float() - expected.float()).abs().mean()
-        if make_input is make_image_cvcuda:
-            assert mae < (122.5 if interpolation == "nearest" else 6), f"MAE: {mae}"
-        else:
-            assert mae < 1 if interpolation == "nearest" else 6
+        assert mae < 1 if interpolation == "nearest" else 6
 
     def _compute_output_canvas_size(self, *, expand, canvas_size, affine_matrix):
         if not expand:
